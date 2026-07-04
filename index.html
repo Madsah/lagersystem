@@ -8,7 +8,7 @@
 
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
- 
+
 
 
 <!-- React + Babel -->
@@ -43,6 +43,79 @@
     --crit-bg: #F3E0DD;
     --line: #DEDCD3;
   }
+
+  /* Dark theme */
+  body.dark {
+    --paper: #1A1917;
+    --paper-dim: #242320;
+    --ink: #F0EFE9;
+    --ink-soft: #8A8880;
+    --rust: #E06030;
+    --rust-dim: #3A2218;
+    --good: #4A9460;
+    --good-bg: #1A2E1F;
+    --low: #C89438;
+    --low-bg: #2A2010;
+    --crit: #C94848;
+    --crit-bg: #2E1515;
+    --line: #333230;
+  }
+  body.dark { background: var(--paper); color: var(--ink); }
+  body.dark .login-wrap { background: #111110; }
+  body.dark .login-box { background: var(--paper-dim); }
+  body.dark .modal { background: var(--paper-dim); }
+  body.dark .export-menu { background: var(--paper-dim); }
+  body.dark input, body.dark select, body.dark textarea { background: var(--paper); color: var(--ink); border-color: var(--line); }
+  body.dark tbody tr:hover { background: var(--paper-dim); }
+
+  /* Dark theme toggle button */
+  .theme-btn {
+    font-family: 'IBM Plex Mono', monospace; font-size: 16px; background: none;
+    border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px;
+    cursor: pointer; color: var(--ink-soft); line-height: 1;
+  }
+  .theme-btn:hover { border-color: var(--ink); color: var(--ink); }
+
+  /* Dashboard */
+  .dashboard-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px; margin-bottom: 28px;
+  }
+  .dash-card {
+    border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px;
+    background: var(--paper); cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  .dash-card:hover { border-color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .dash-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .dash-card-name { font-family: 'Oswald', sans-serif; text-transform: uppercase; font-size: 16px; font-weight: 600; }
+  .dash-card-stats { display: flex; gap: 16px; font-size: 12px; color: var(--ink-soft); margin-bottom: 12px; }
+  .dash-card-stats b { color: var(--ink); }
+  .dash-card-kritisk { font-size: 11px; margin-top: 6px; }
+  .dash-card-kritisk span { display: inline-block; background: var(--crit-bg); color: var(--crit); padding: 2px 6px; border-radius: 3px; margin: 2px 2px 2px 0; font-weight: 600; }
+  .dash-card-actions { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .dash-quick-btn {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 5px 10px;
+    border: 1px solid var(--line); background: var(--paper-dim); border-radius: 3px;
+    cursor: pointer; color: var(--ink-soft);
+  }
+  .dash-quick-btn:hover { border-color: var(--ink); color: var(--ink); }
+  .dash-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-bottom: 24px; }
+  .dash-summary-cell { background: var(--paper); padding: 14px 16px; }
+  .dash-summary-num { font-family: 'Oswald', sans-serif; font-size: 28px; font-weight: 700; line-height: 1; }
+  .dash-summary-num.crit { color: var(--crit); }
+  .dash-summary-num.low { color: var(--low); }
+  .dash-summary-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin-top: 4px; }
+
+  /* Mobile quick-count */
+  .mobil-optaelling { padding: 0; }
+  .mobil-vare-row { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); gap: 12px; }
+  .mobil-vare-navn { flex: 1; font-weight: 600; font-size: 15px; }
+  .mobil-vare-kat { font-size: 11px; color: var(--ink-soft); }
+  .mobil-input { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 700; width: 80px; text-align: center; padding: 8px; border: 2px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); }
+  .mobil-input:focus { border-color: var(--rust); outline: none; }
+  .mobil-input.udfyldt { border-color: var(--good); background: var(--good-bg); }
+  .mobil-footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--paper); border-top: 2px solid var(--ink); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; z-index: 20; }
+  .mobil-progress { font-size: 12px; color: var(--ink-soft); }
 
   * { box-sizing: border-box; }
 
@@ -464,6 +537,95 @@ async function dbLoadAll(restaurantId) {
 }
 
 // ================================================================
+// MOBIL OPTAELLING COMPONENT (needs its own hooks, so a real component)
+// ================================================================
+function MobilOptaelling({ varerForRest, activeRestId, restNavn, harPakke, toStkCombo, addOptaelling, saving, onDone, onCancel }) {
+  const [mCounts, setMCounts] = useState(() => {
+    const c = {};
+    varerForRest.forEach(it => { c[it.id] = { pakker: '', loese: '' }; });
+    return c;
+  });
+  const [mDato, setMDato] = useState(todayStr());
+  const [mHvem, setMHvem] = useState('');
+
+  const udfyldte = varerForRest.filter(it => {
+    const c = mCounts[it.id] || {};
+    return (c.pakker !== '' && c.pakker !== undefined) || (c.loese !== '' && c.loese !== undefined);
+  }).length;
+
+  async function gem() {
+    const counts = {};
+    let any = false;
+    varerForRest.forEach(it => {
+      const c = mCounts[it.id] || {};
+      if ((c.pakker !== '' && c.pakker !== undefined) || (c.loese !== '' && c.loese !== undefined)) {
+        const stk = toStkCombo(it, c.pakker, c.loese);
+        if (stk !== null) { counts[it.id] = { stk, antalPakker: parseFloat(c.pakker) || 0, antalLoese: parseFloat(c.loese) || 0 }; any = true; }
+      }
+    });
+    if (!any) { alert('Indtast mindst ét antal.'); return; }
+    await addOptaelling({ dato: mDato, counts, note: '', hvem: mHvem });
+    onDone();
+  }
+
+  const kategorier = [];
+  varerForRest.forEach(it => {
+    const k = it.kategori || 'Andet';
+    let g = kategorier.find(g => g.navn === k);
+    if (!g) { g = { navn: k, varer: [] }; kategorier.push(g); }
+    g.varer.push(it);
+  });
+
+  return (
+    <div className="mobil-optaelling">
+      <div style={{ padding: '12px 16px 8px', borderBottom: '1px solid var(--line)', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ fontFamily: 'Oswald, sans-serif', textTransform: 'uppercase', fontSize: 16, fontWeight: 700 }}>Hurtig optælling — {restNavn(activeRestId)}</div>
+        <input type="date" value={mDato} onChange={e => setMDato(e.target.value)} style={{ fontSize: 13, padding: '4px 8px', border: '1px solid var(--line)', borderRadius: 3, background: 'var(--paper)', color: 'var(--ink)' }} />
+        <input value={mHvem} onChange={e => setMHvem(e.target.value)} placeholder="dit navn (valgfri)" style={{ fontSize: 13, padding: '4px 8px', border: '1px solid var(--line)', borderRadius: 3, background: 'var(--paper)', color: 'var(--ink)', width: 160 }} />
+      </div>
+      {kategorier.map(gruppe => (
+        <div key={gruppe.navn}>
+          <div style={{ padding: '8px 16px', background: 'var(--paper-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-soft)', fontFamily: 'Oswald, sans-serif', fontWeight: 600 }}>{gruppe.navn}</div>
+          {gruppe.varer.map(it => {
+            const c = mCounts[it.id] || { pakker: '', loese: '' };
+            const erUdfyldt = (c.pakker !== '' && c.pakker !== undefined) || (c.loese !== '' && c.loese !== undefined);
+            return (
+              <div className="mobil-vare-row" key={it.id} style={{ background: erUdfyldt ? 'var(--good-bg)' : 'var(--paper)' }}>
+                <div style={{ flex: 1 }}>
+                  <div className="mobil-vare-navn">{it.navn}</div>
+                  <div className="mobil-vare-kat">{it.enhed}{harPakke(it) ? ` · ${it.pakke_str}=${it.pakke_antal}` : ''}</div>
+                </div>
+                {harPakke(it) ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 9, color: 'var(--ink-soft)', marginBottom: 2 }}>{it.pakke_str}</div>
+                      <input className={`mobil-input ${c.pakker !== '' ? 'udfyldt' : ''}`} type="number" min="0" inputMode="numeric" placeholder="0" value={c.pakker} onChange={e => setMCounts({ ...mCounts, [it.id]: { ...c, pakker: e.target.value } })} />
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 14 }}>+</div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 9, color: 'var(--ink-soft)', marginBottom: 2 }}>løse</div>
+                      <input className={`mobil-input ${c.loese !== '' ? 'udfyldt' : ''}`} type="number" min="0" inputMode="numeric" placeholder="0" value={c.loese} onChange={e => setMCounts({ ...mCounts, [it.id]: { ...c, loese: e.target.value } })} />
+                    </div>
+                  </div>
+                ) : (
+                  <input className={`mobil-input ${c.loese !== '' ? 'udfyldt' : ''}`} type="number" min="0" inputMode="numeric" placeholder="0" value={c.loese} onChange={e => setMCounts({ ...mCounts, [it.id]: { ...c, loese: e.target.value } })} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      <div style={{ height: 80 }} />
+      <div className="mobil-footer">
+        <button className="btn ghost" onClick={onCancel}>Annullér</button>
+        <span className="mobil-progress">{udfyldte} / {varerForRest.length} talt</span>
+        <button className="btn rust" onClick={gem} disabled={saving}>Gem optælling</button>
+      </div>
+    </div>
+  );
+}
+
+// ================================================================
 // APP
 // ================================================================
 function App() {
@@ -522,10 +684,11 @@ function MainApp({ session }) {
   const [activeRestId, setActiveRestId] = useState(null);
   const [restData, setRestData] = useState({ varer: [], optaellinger: [], leverancer: [], spild: [], posTal: [] });
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('lager');
+  const [view, setView] = useState('dashboard');
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState(null);
   const [printView, setPrintView] = useState(null);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [periodeFra, setPeriodeFra] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
   const [periodeTil, setPeriodeTil] = useState(todayStr());
   const [eksportMenuAaben, setEksportMenuAaben] = useState(false);
@@ -565,6 +728,12 @@ function MainApp({ session }) {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [eksportMenuAaben]);
+
+  // Dark mode body class
+  useEffect(() => {
+    if (darkMode) { document.body.classList.add('dark'); localStorage.setItem('darkMode', 'true'); }
+    else { document.body.classList.remove('dark'); localStorage.setItem('darkMode', 'false'); }
+  }, [darkMode]);
 
   const restNavn = (id) => (restauranter.find(r => r.id === id) || {}).navn || '';
   const vareById = (id) => restData.varer.find(v => v.id === id);
@@ -1009,6 +1178,144 @@ function MainApp({ session }) {
   const forbrug = computeForbrug();
   const optStatus = getOptaellingsStatus();
   const PAAMINDELSESDAGE = 14;
+
+  function renderDashboard() {
+    // Compute status for all restaurants using current restData (active restaurant only)
+    // For the active restaurant we have full data; others show basic info
+    const forbrug = computeForbrug();
+    const optStatus = getOptaellingsStatus();
+
+    // Count critical/low for active restaurant
+    const kritiskeVarer = varerForRest.filter(it => {
+      const latest = getLatestCount(it.id);
+      const f = forbrug[it.id];
+      const status = vurderLagerstatus(latest, f, it);
+      return status && status.niveau === 'crit';
+    });
+    const laveVarer = varerForRest.filter(it => {
+      const latest = getLatestCount(it.id);
+      const f = forbrug[it.id];
+      const status = vurderLagerstatus(latest, f, it);
+      return status && status.niveau === 'low';
+    });
+
+    const PAAMINDELSESDAGE = 14;
+
+    return (
+      <div>
+        <div className="section-title">Dashboard</div>
+
+        {/* Summary strip for active restaurant */}
+        <div className="dash-summary">
+          <div className="dash-summary-cell">
+            <div className={`dash-summary-num ${kritiskeVarer.length > 0 ? 'crit' : ''}`}>{kritiskeVarer.length}</div>
+            <div className="dash-summary-label">Kritiske varer</div>
+          </div>
+          <div className="dash-summary-cell">
+            <div className={`dash-summary-num ${laveVarer.length > 0 ? 'low' : ''}`}>{laveVarer.length}</div>
+            <div className="dash-summary-label">Lav beholdning</div>
+          </div>
+          <div className="dash-summary-cell">
+            <div className="dash-summary-num">{varerForRest.length}</div>
+            <div className="dash-summary-label">Varer i alt</div>
+          </div>
+          <div className="dash-summary-cell">
+            <div className={`dash-summary-num ${optStatus.aldrigTalt || optStatus.dage >= PAAMINDELSESDAGE ? 'low' : ''}`}>
+              {optStatus.aldrigTalt ? '—' : `${optStatus.dage}d`}
+            </div>
+            <div className="dash-summary-label">Siden optælling</div>
+          </div>
+        </div>
+
+        {/* Restaurant cards */}
+        <div className="dashboard-grid">
+          {restauranter.map(r => {
+            const erAktiv = r.id === activeRestId;
+            const kritiske = erAktiv ? kritiskeVarer : [];
+            const lave = erAktiv ? laveVarer : [];
+            const status = kritiske.length > 0 ? 'crit' : lave.length > 0 ? 'low' : 'good';
+            return (
+              <div className="dash-card" key={r.id} onClick={() => { setActiveRestId(r.id); setView('lager'); }}>
+                <div className="dash-card-top">
+                  <div className="dash-card-name">{r.navn}</div>
+                  <span className={`tag ${status}`}>
+                    {status === 'crit' ? `${kritiske.length} kritisk` : status === 'low' ? `${lave.length} lav` : 'OK'}
+                  </span>
+                </div>
+                <div className="dash-card-stats">
+                  <span><b>{erAktiv ? varerForRest.length : '…'}</b> varer</span>
+                  {erAktiv && optStatus.aldrigTalt && <span style={{ color: 'var(--low)' }}>Aldrig talt</span>}
+                  {erAktiv && !optStatus.aldrigTalt && <span>Sidst talt <b>{optStatus.dage}d</b> siden</span>}
+                </div>
+                {erAktiv && kritiske.length > 0 && (
+                  <div className="dash-card-kritisk">
+                    Kritisk: {kritiske.slice(0, 4).map(it => <span key={it.id}>{it.navn}</span>)}
+                    {kritiske.length > 4 && <span>+{kritiske.length - 4} mere</span>}
+                  </div>
+                )}
+                <div className="dash-card-actions" onClick={e => e.stopPropagation()}>
+                  <button className="dash-quick-btn" onClick={() => { setActiveRestId(r.id); setView('lager'); }}>Lager</button>
+                  <button className="dash-quick-btn" onClick={() => { setActiveRestId(r.id); setView('mobil-optaelling'); }}>📋 Hurtig optælling</button>
+                  <button className="dash-quick-btn" onClick={() => { setActiveRestId(r.id); openNewOptaelling(); }}>+ Optælling</button>
+                  <button className="dash-quick-btn" onClick={() => { setActiveRestId(r.id); openAddDelivery(null); }}>+ Levering</button>
+                </div>
+              </div>
+            );
+          })}
+          <div className="dash-card" style={{ borderStyle: 'dashed', cursor: 'pointer' }} onClick={openAddRest}>
+            <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--ink-soft)' }}>
+              <div style={{ fontSize: 24, marginBottom: 6 }}>+</div>
+              <div style={{ fontSize: 13 }}>Tilføj restaurant</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent activity from active restaurant */}
+        <div className="print-report-section-title">Seneste aktivitet — {restNavn(activeRestId)}</div>
+        {restData.optaellinger.length === 0 && restData.leverancer.length === 0 ? (
+          <div className="compare-empty-note">Ingen aktivitet endnu.</div>
+        ) : (
+          <div className="history-list">
+            {[
+              ...restData.optaellinger.map(o => ({ ...o, _type: 'optaelling' })),
+              ...restData.leverancer.map(l => ({ ...l, _type: 'levering' })),
+            ].sort((a, b) => (b.dato + (b.oprettet || '')).localeCompare(a.dato + (a.oprettet || '')))
+             .slice(0, 8)
+             .map(e => {
+              const vare = e._type !== 'optaelling' ? vareById(e.vare_id) : null;
+              const typeLabel = e._type === 'optaelling' ? 'Optælling' : 'Levering';
+              return (
+                <div className="history-row" key={e._type + e.id} onClick={() => setView('historik')}>
+                  <span className="history-date">{fmtDateShort(e.dato)}</span>
+                  <span className={`history-type ${e._type}`}>{typeLabel}</span>
+                  <span style={{ flex: 1 }}>
+                    {e._type === 'optaelling'
+                      ? `${Object.keys(e.counts || {}).length} varer talt${e.note ? ' — ' + e.note : ''}`
+                      : `${fmtPakkeLoese(vare, e.antal_pakker, e.antal_loese)} ${vare?.navn || ''}${e.note ? ' — ' + e.note : ''}`}
+                  </span>
+                  {e.hvem && <span className="history-who">{e.hvem}</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderMobilOptaelling() {
+    return <MobilOptaelling
+      varerForRest={varerForRest}
+      activeRestId={activeRestId}
+      restNavn={restNavn}
+      harPakke={harPakke}
+      toStkCombo={toStkCombo}
+      addOptaelling={addOptaelling}
+      saving={saving}
+      onDone={() => setView('dashboard')}
+      onCancel={() => setView('dashboard')}
+    />;
+  }
 
   function renderLager() {
     const items = varerForRest.filter(it => !search || it.navn.toLowerCase().includes(search.toLowerCase()) || it.kategori.toLowerCase().includes(search.toLowerCase()));
@@ -1468,6 +1775,7 @@ function MainApp({ session }) {
           </div>
           <div className="topbar-right no-print">
             {saving && <span style={{ fontSize: 11, color: 'var(--ink-soft)' }}>Gemmer…</span>}
+            <button className="theme-btn" onClick={() => setDarkMode(!darkMode)} title={darkMode ? 'Lyst tema' : 'Mørkt tema'}>{darkMode ? '☀️' : '🌙'}</button>
             <div className="export-wrap">
               <button className="btn small ghost" onClick={() => setEksportMenuAaben(!eksportMenuAaben)}>⬇ Eksportér</button>
               {eksportMenuAaben && (
@@ -1492,6 +1800,7 @@ function MainApp({ session }) {
         </div>
 
         <div className="view-tabs no-print">
+          <button className={`vt-btn ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>Dashboard</button>
           <button className={`vt-btn ${view === 'lager' ? 'active' : ''}`} onClick={() => setView('lager')}>Lager</button>
           <button className={`vt-btn ${view === 'historik' ? 'active' : ''}`} onClick={() => setView('historik')}>Historik</button>
           <button className={`vt-btn ${view === 'sammenligning' ? 'active' : ''}`} onClick={() => setView('sammenligning')}>Sammenligning</button>
@@ -1500,6 +1809,8 @@ function MainApp({ session }) {
         </div>
 
         <div className="panel">
+          {view === 'dashboard' && renderDashboard()}
+          {view === 'mobil-optaelling' && renderMobilOptaelling()}
           {view === 'lager' && renderLager()}
           {view === 'historik' && renderHistorik()}
           {view === 'sammenligning' && renderSammenligning()}
