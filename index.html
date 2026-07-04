@@ -624,11 +624,19 @@ function MainApp({ session }) {
     return { perVare, maaneder: Array.from(alleMaaneder).sort() };
   }
 
-  function vurderLagerstatus(latest, forbrugEntry) {
-    if (!latest || !forbrugEntry || !forbrugEntry.perDag || forbrugEntry.perDag <= 0) return null;
+  function vurderLagerstatus(latest, forbrugEntry, vare) {
+    if (!latest) return null;
+    // Check minimum threshold first (hard floor, if set)
+    if (vare && vare.minimum !== null && vare.minimum !== undefined) {
+      if (latest.stk <= 0) return { dageTilbage: 0, niveau: 'crit', grund: 'tom' };
+      if (latest.stk < vare.minimum) return { dageTilbage: null, niveau: 'crit', grund: 'under-min', minimum: vare.minimum };
+      if (latest.stk < vare.minimum * 1.5) return { dageTilbage: null, niveau: 'low', grund: 'naer-min', minimum: vare.minimum };
+    }
+    // Soft estimate based on consumption rate
+    if (!forbrugEntry || !forbrugEntry.perDag || forbrugEntry.perDag <= 0) return null;
     const dageTilbage = latest.stk / forbrugEntry.perDag;
     const niveau = dageTilbage < 7 ? 'crit' : dageTilbage < 14 ? 'low' : 'good';
-    return { dageTilbage: Math.round(dageTilbage), niveau };
+    return { dageTilbage: Math.round(dageTilbage), niveau, grund: 'forbrug' };
   }
 
   function getOptaellingsStatus() {
@@ -641,7 +649,7 @@ function MainApp({ session }) {
   // ---- Supabase mutations ----
   async function reloadData() {
     const data = await dbLoadAll(activeRestId);
-    setRestData(data);
+    setRestData({ ...data });
   }
 
   async function addRestaurant(navn) {
@@ -725,8 +733,10 @@ function MainApp({ session }) {
   function openAddRest() { setModal({ type: 'rest-add', navn: '' }); }
   function openEditRest(r) { setModal({ type: 'rest-edit', id: r.id, navn: r.navn }); }
 
-  function openAddItem() { setModal({ type: 'vare-add', navn: '', kategori: '', enhed: 'stk', brugPakke: false, pakkeStr: '', pakkeAntal: '' }); }
+  function openAddItem() { setModal({ type: 'vare-add', navn: '', kategori: '', enhed: 'stk', brugPakke: false, pakkeStr: '', pakkeAntal: '', note: '', minimum: '' }); }
   function openEditItem(it) { setModal({ type: 'vare-edit', item: { ...it }, brugPakke: harPakke(it) }); }
+  function openBulkAdd() { setModal({ type: 'vare-bulk', tekst: '', fejl: '' }); }
+  function openKopierVarer(fraRestId) { setModal({ type: 'vare-kopier', fraRestId, tilRestId: activeRestId }); }
 
   function openAddDelivery(it) {
     setModal({ type: 'levering', vareId: it ? it.id : (varerForRest[0]?.id || ''), antalPakker: '', antalLoese: '', dato: todayStr(), note: '', hvem: '' });
@@ -772,13 +782,14 @@ function MainApp({ session }) {
 
   async function submitAddItem() {
     if (!modal.navn.trim()) return;
-    await addVare({ navn: modal.navn.trim(), kategori: modal.kategori.trim() || 'Andet', enhed: modal.enhed || 'stk', pakke_str: modal.brugPakke ? (modal.pakkeStr.trim() || 'ramme') : '', pakke_antal: modal.brugPakke ? (parseFloat(modal.pakkeAntal) || null) : null });
+    await addVare({ navn: modal.navn.trim(), kategori: modal.kategori.trim() || 'Andet', enhed: modal.enhed || 'stk', pakke_str: modal.brugPakke ? (modal.pakkeStr.trim() || 'ramme') : '', pakke_antal: modal.brugPakke ? (parseFloat(modal.pakkeAntal) || null) : null, note: modal.note || '', minimum: modal.minimum !== '' ? parseFloat(modal.minimum) || null : null });
     setModal(null);
   }
   async function submitEditItem() {
     const it = { ...modal.item };
     if (!modal.brugPakke) { it.pakke_str = ''; it.pakke_antal = null; } else { it.pakke_antal = parseFloat(it.pakke_antal) || null; }
-    await updateVare(it.id, { navn: it.navn, kategori: it.kategori, enhed: it.enhed, pakke_str: it.pakke_str, pakke_antal: it.pakke_antal });
+    it.minimum = it.minimum !== '' && it.minimum !== null && it.minimum !== undefined ? parseFloat(it.minimum) || null : null;
+    await updateVare(it.id, { navn: it.navn, kategori: it.kategori, enhed: it.enhed, pakke_str: it.pakke_str, pakke_antal: it.pakke_antal, note: it.note || '', minimum: it.minimum });
     setModal(null);
   }
   async function handleDeleteItem(it) {
@@ -786,17 +797,52 @@ function MainApp({ session }) {
     await deleteVare(it.id);
   }
 
+  async function submitBulkAdd() {
+    // Format per linje: "Navn, Kategori, Enhed" — kategori og enhed er valgfrie
+    const linjer = modal.tekst.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!linjer.length) return;
+    const varer = linjer.map(l => {
+      const dele = l.split(',').map(s => s.trim());
+      return { navn: dele[0] || '', kategori: dele[1] || 'Andet', enhed: dele[2] || 'stk', pakke_str: '', pakke_antal: null, note: '', minimum: null };
+    }).filter(v => v.navn);
+    if (!varer.length) { setModal({ ...modal, fejl: 'Ingen gyldige varer fundet — tjek formatet.' }); return; }
+    setSaving(true);
+    for (const v of varer) {
+      await supabase.from('varer').insert({ ...v, restaurant_id: activeRestId });
+    }
+    await reloadData();
+    setSaving(false);
+    setModal(null);
+  }
+
+  async function submitKopierVarer() {
+    const kildeVarer = (await supabase.from('varer').select('*').eq('restaurant_id', modal.fraRestId)).data || [];
+    if (!kildeVarer.length) { alert('Ingen varer at kopiere fra den valgte restaurant.'); return; }
+    setSaving(true);
+    for (const v of kildeVarer) {
+      const { id, restaurant_id, created_at, ...rest } = v;
+      await supabase.from('varer').insert({ ...rest, restaurant_id: activeRestId });
+    }
+    await reloadData();
+    setSaving(false);
+    setModal(null);
+  }
+
   async function submitLevering() {
     const vare = vareById(modal.vareId);
-    const antalStk = toStkCombo(vare, modal.antalPakker, modal.antalLoese);
-    if (!antalStk || antalStk <= 0) return;
+    const antalStk = harPakke(vare)
+      ? toStkCombo(vare, modal.antalPakker, modal.antalLoese)
+      : parseFloat(modal.antalLoese) || 0;
+    if (!antalStk || antalStk <= 0) { alert('Indtast et antal større end 0.'); return; }
     await addLevering({ vare_id: modal.vareId, antal_stk: antalStk, antal_pakker: parseFloat(modal.antalPakker) || 0, antal_loese: parseFloat(modal.antalLoese) || 0, dato: modal.dato || todayStr(), note: modal.note, hvem: modal.hvem || '' });
     setModal(null);
   }
   async function submitSpildEntry() {
     const vare = vareById(modal.vareId);
-    const antalStk = toStkCombo(vare, modal.antalPakker, modal.antalLoese);
-    if (!antalStk || antalStk <= 0) return;
+    const antalStk = harPakke(vare)
+      ? toStkCombo(vare, modal.antalPakker, modal.antalLoese)
+      : parseFloat(modal.antalLoese) || 0;
+    if (!antalStk || antalStk <= 0) { alert('Indtast et antal større end 0.'); return; }
     await addSpild({ vare_id: modal.vareId, antal_stk: antalStk, antal_pakker: parseFloat(modal.antalPakker) || 0, antal_loese: parseFloat(modal.antalLoese) || 0, dato: modal.dato || todayStr(), note: modal.note, hvem: modal.hvem || '' });
     setModal(null);
   }
@@ -975,6 +1021,8 @@ function MainApp({ session }) {
           <input className="search-box" placeholder="Søg vare eller kategori…" value={search} onChange={e => setSearch(e.target.value)} />
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn ghost" onClick={openAddItem}>+ Tilføj vare</button>
+            <button className="btn ghost" onClick={openBulkAdd}>+ Tilføj mange</button>
+            {restauranter.length > 1 && <button className="btn ghost" onClick={() => openKopierVarer(restauranter.find(r => r.id !== activeRestId)?.id)}>Kopiér fra anden restaurant</button>}
             <button className="btn ghost" onClick={() => openAddDelivery(null)}>+ Levering</button>
             <button className="btn ghost" onClick={() => openAddSpild(null)}>+ Spild</button>
             <button className="btn ghost" onClick={openPosIndsaet}>+ Salgstal fra POS</button>
@@ -994,17 +1042,27 @@ function MainApp({ session }) {
               {items.map(it => {
                 const latest = getLatestCount(it.id);
                 const f = forbrug[it.id];
-                const status = vurderLagerstatus(latest, f);
                 return (
                   <tr key={it.id}>
-                    <td><div className="item-name">{it.navn}</div><div className="item-cat">{it.enhed}{harPakke(it) ? ` · 1 ${it.pakke_str} = ${it.pakke_antal} ${it.enhed}` : ''}</div></td>
+                    <td>
+                      <div className="item-name">{it.navn}</div>
+                      <div className="item-cat">{it.enhed}{harPakke(it) ? ` · 1 ${it.pakke_str} = ${it.pakke_antal} ${it.enhed}` : ''}</div>
+                      {it.note && <div className="item-cat" style={{ fontStyle: 'italic' }}>{it.note}</div>}
+                    </td>
                     <td className="item-cat">{it.kategori}</td>
                     <td className="num">
                       {latest ? (harPakke(it) && latest.antalPakker !== undefined ? (
                         <><div>{fmtPakkeLoese(it, latest.antalPakker, latest.antalLoese)}</div><div className="item-cat">= {latest.stk} {it.enhed}</div></>
                       ) : `${latest.stk} ${it.enhed}`) : <span className="item-cat">ikke talt</span>}
                     </td>
-                    <td className="num">{status ? <span className={`tag ${status.niveau}`}>~{status.dageTilbage} dage</span> : <span className="item-cat">—</span>}</td>
+                    <td className="num">{(() => {
+                        const status = vurderLagerstatus(latest, f, it);
+                        if (!status) return <span className="item-cat">—</span>;
+                        if (status.grund === 'tom') return <span className="tag crit">Tom</span>;
+                        if (status.grund === 'under-min') return <span className="tag crit">Under min. ({status.minimum} {it.enhed})</span>;
+                        if (status.grund === 'naer-min') return <span className="tag low">Nær min. ({status.minimum} {it.enhed})</span>;
+                        return <span className={`tag ${status.niveau}`}>~{status.dageTilbage} dage</span>;
+                      })()}</td>
                     <td className="num">{f ? <span className={`delta ${f.solgt > 0 ? 'used' : 'zero'}`}>{f.solgt} {it.enhed}</span> : <span className="item-cat">—</span>}</td>
                     <td className="num">{f && f.spild > 0 ? <span className="delta used">{f.spild} {it.enhed}</span> : <span className="item-cat">—</span>}</td>
                     <td className="num">{f ? <span className="item-cat">{f.perDag}/dag</span> : <span className="item-cat">—</span>}</td>
@@ -1262,6 +1320,10 @@ function MainApp({ session }) {
                     <div className="field"><label>Kategori</label><input value={currentModal.kategori} onChange={e => setModal({ ...currentModal, kategori: e.target.value })} placeholder="f.eks. Øl" /></div>
                     <div className="field"><label>Enhed</label><input value={currentModal.enhed} onChange={e => setModal({ ...currentModal, enhed: e.target.value })} placeholder="stk / flasker" /></div>
                   </div>
+                  <div className="field-row">
+                    <div className="field"><label>Minimum-beholdning (valgfri)</label><input type="number" min="0" value={currentModal.minimum} onChange={e => setModal({ ...currentModal, minimum: e.target.value })} placeholder="f.eks. 12" /></div>
+                  </div>
+                  <div className="field"><label>Note/kommentar (valgfri)</label><input value={currentModal.note} onChange={e => setModal({ ...currentModal, note: e.target.value })} placeholder="f.eks. bestil kun fra Carlsberg" /></div>
                   <div className="field"><label><input type="checkbox" checked={currentModal.brugPakke} onChange={e => setModal({ ...currentModal, brugPakke: e.target.checked })} style={{ width: 'auto', marginRight: 6 }} />Kommer i ramme/kasse</label></div>
                   {currentModal.brugPakke && (
                     <div className="field-row">
@@ -1281,6 +1343,10 @@ function MainApp({ session }) {
                     <div className="field"><label>Kategori</label><input value={currentModal.item.kategori} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, kategori: e.target.value } })} /></div>
                     <div className="field"><label>Enhed</label><input value={currentModal.item.enhed} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, enhed: e.target.value } })} /></div>
                   </div>
+                  <div className="field-row">
+                    <div className="field"><label>Minimum-beholdning (valgfri)</label><input type="number" min="0" value={currentModal.item.minimum ?? ''} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, minimum: e.target.value } })} placeholder="f.eks. 12" /></div>
+                  </div>
+                  <div className="field"><label>Note/kommentar (valgfri)</label><input value={currentModal.item.note || ''} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, note: e.target.value } })} placeholder="f.eks. bestil kun fra Carlsberg" /></div>
                   <div className="field"><label><input type="checkbox" checked={currentModal.brugPakke} onChange={e => setModal({ ...currentModal, brugPakke: e.target.checked })} style={{ width: 'auto', marginRight: 6 }} />Kommer i ramme/kasse</label></div>
                   {currentModal.brugPakke && (
                     <div className="field-row">
@@ -1290,6 +1356,31 @@ function MainApp({ session }) {
                   )}
                 </div>
                 <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitEditItem} disabled={saving}>Gem</button></div>
+              </>)}
+
+              {currentModal.type === 'vare-bulk' && (<>
+                <div className="modal-head"><div className="modal-title">Tilføj mange varer</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body">
+                  <div className="hint">Skriv én vare per linje i formatet: <strong>Navn, Kategori, Enhed</strong><br />Kategori og enhed er valgfrie — standard er "Andet" og "stk".<br />Eksempel:<br />Coca-Cola 33cl, Sodavand, stk<br />Carlsberg fadøl, Øl, fustage<br />Husets rødvin, Vin, flasker</div>
+                  <div className="field"><label>Varer</label><textarea rows="12" value={currentModal.tekst} onChange={e => setModal({ ...currentModal, tekst: e.target.value })} placeholder="Coca-Cola 33cl, Sodavand, stk&#10;Sprite 33cl, Sodavand, stk&#10;Carlsberg fadøl, Øl, fustage" autoFocus /></div>
+                  {currentModal.fejl && <div style={{ color: 'var(--crit)', fontSize: 12 }}>{currentModal.fejl}</div>}
+                </div>
+                <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitBulkAdd} disabled={saving}>Tilføj alle varer</button></div>
+              </>)}
+
+              {currentModal.type === 'vare-kopier' && (<>
+                <div className="modal-head"><div className="modal-title">Kopiér vareliste</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body">
+                  <div className="hint">Kopiér alle varer fra én restaurant til denne. Optællinger og historik kopieres ikke — kun selve varelistens navne, kategorier og pakke-indstillinger.</div>
+                  <div className="field">
+                    <label>Kopiér fra</label>
+                    <select value={currentModal.fraRestId} onChange={e => setModal({ ...currentModal, fraRestId: e.target.value })}>
+                      {restauranter.filter(r => r.id !== activeRestId).map(r => <option key={r.id} value={r.id}>{r.navn}</option>)}
+                    </select>
+                  </div>
+                  <div className="field"><label>Kopiér til</label><input value={restNavn(activeRestId)} disabled /></div>
+                </div>
+                <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitKopierVarer} disabled={saving}>Kopiér varer</button></div>
               </>)}
 
               {currentModal.type === 'levering' && (<>
