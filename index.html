@@ -9,6 +9,9 @@
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
 
+<!-- Recharts (graphs) -->
+<script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js"></script>
+
 <!-- React + Babel -->
 <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
@@ -1160,6 +1163,204 @@ function MainApp({ session }) {
     );
   }
 
+  function renderAnalyse() {
+    // Extract Recharts components from global
+    const { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } = Recharts;
+
+    const FARVER = ['#C4501C','#3D7A4F','#B8842E','#1C6B8A','#8B4FB3','#B23B3B','#2E7D68','#C4881C','#4A6FA5','#7D4E3A'];
+
+    const opts = getOptaellingerSorted();
+    const forbrug = computeForbrug();
+    const { perVare, maaneder } = computeMaanedsForbrug();
+
+    // ---- 7: Forbrug over tid (linjediagram) ----
+    // Build data points: for each consecutive pair of optaellinger, one point per vare
+    const tidspunkter = [];
+    varerForRest.forEach(it => {
+      const relevantOpts = opts.filter(o => o.counts && o.counts[it.id] !== undefined);
+      for (let i = 1; i < relevantOpts.length; i++) {
+        const prev = relevantOpts[i-1], last = relevantOpts[i];
+        const leveret = restData.leverancer.filter(l => l.vare_id === it.id && l.dato > prev.dato && l.dato <= last.dato).reduce((s,l) => s+l.antal_stk, 0);
+        const spildT = restData.spild.filter(sp => sp.vare_id === it.id && sp.dato > prev.dato && sp.dato <= last.dato).reduce((s,sp) => s+sp.antal_stk, 0);
+        const prevVal = typeof prev.counts[it.id] === 'object' ? prev.counts[it.id].stk : prev.counts[it.id];
+        const lastVal = typeof last.counts[it.id] === 'object' ? last.counts[it.id].stk : last.counts[it.id];
+        const solgt = prevVal + leveret - lastVal - spildT;
+        const dage = Math.max(1, Math.round((new Date(last.dato) - new Date(prev.dato)) / 86400000));
+        tidspunkter.push({ dato: last.dato, vareId: it.id, vare: it.navn, solgt, perDag: +(solgt/dage).toFixed(2), dage });
+      }
+    });
+
+    // Group by dato for the line chart
+    const datoer = [...new Set(tidspunkter.map(t => t.dato))].sort();
+    const linjeData = datoer.map(dato => {
+      const obj = { dato: fmtDateShort(dato) };
+      varerForRest.forEach(it => {
+        const punkt = tidspunkter.find(t => t.dato === dato && t.vareId === it.id);
+        if (punkt) obj[it.navn] = punkt.perDag;
+      });
+      return obj;
+    });
+
+    // ---- 8: Top/bund rangering ----
+    const rangeringData = varerForRest
+      .map(it => ({ navn: it.navn, enhed: it.enhed, ...forbrug[it.id] }))
+      .filter(it => it.solgt !== undefined && it.solgt !== null)
+      .sort((a, b) => b.solgt - a.solgt);
+
+    // ---- 9: Sammenlign restauranter ----
+    // For each vare that exists in multiple restaurants, compare consumption
+    const alleRestData = {}; // restId -> { forbrug data }
+    // We only have data for activeRest here — note for user
+    const sammenligningNote = restauranter.length <= 1;
+
+    // ---- 10: Sæsonudsving — heatmap-style tabel ----
+    const saesonData = varerForRest.map(it => ({
+      navn: it.navn,
+      maaneder: maaneder.map(m => ({ maaned: fmtMaaned(m), solgt: perVare[it.id]?.[m] || 0 }))
+    })).filter(it => it.maaneder.some(m => m.solgt > 0));
+
+    // Color scale for heatmap
+    function heatmapFarve(solgt, max) {
+      if (!max || solgt === 0) return 'var(--paper-dim)';
+      const pct = solgt / max;
+      if (pct > 0.75) return '#C4501C';
+      if (pct > 0.5) return '#E8742A';
+      if (pct > 0.25) return '#F5A55A';
+      return '#FAD4B8';
+    }
+
+    const harNokData = opts.length >= 2;
+
+    return (
+      <div>
+        <div className="section-title">Analyse</div>
+
+        {!harNokData && (
+          <div className="banner">
+            Du skal have mindst to optællinger for at se forbrugsanalyse. Lav din første og anden optælling, så udfyldes graferne automatisk.
+          </div>
+        )}
+
+        {harNokData && (
+          <>
+            {/* ---- 7: Forbrug over tid ---- */}
+            <div style={{ marginBottom: 36 }}>
+              <div className="print-report-section-title">Forbrug over tid (stk/dag)</div>
+              <div className="compare-empty-note" style={{ marginBottom: 10 }}>Viser gennemsnitligt dagligt forbrug (solgt ÷ dage) for hver periode mellem to optællinger.</div>
+              {linjeData.length < 2 ? (
+                <div className="compare-empty-note">Ikke nok datapunkter endnu — du skal have mindst 3 optællinger for en meningsfuld tidsgraf.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={320}>
+                  <LineChart data={linjeData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#DEDCD3" />
+                    <XAxis dataKey="dato" tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} />
+                    <YAxis tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} />
+                    <Tooltip contentStyle={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'IBM Plex Mono' }} />
+                    {varerForRest.map((it, i) => (
+                      linjeData.some(d => d[it.navn] !== undefined) && (
+                        <Line key={it.id} type="monotone" dataKey={it.navn} stroke={FARVER[i % FARVER.length]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls={false} />
+                      )
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            {/* ---- 8: Rangering ---- */}
+            <div style={{ marginBottom: 36 }}>
+              <div className="print-report-section-title">Rangering — mest til mindst solgt</div>
+              <div className="compare-empty-note" style={{ marginBottom: 10 }}>Baseret på seneste periode mellem to optællinger.</div>
+              {rangeringData.length === 0 ? (
+                <div className="compare-empty-note">Ingen forbrugsdata endnu.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={Math.max(200, rangeringData.length * 36)}>
+                  <BarChart layout="vertical" data={rangeringData} margin={{ top: 0, right: 60, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#DEDCD3" horizontal={false} />
+                    <XAxis type="number" tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} />
+                    <YAxis type="category" dataKey="navn" tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} width={140} />
+                    <Tooltip
+                      contentStyle={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }}
+                      formatter={(value, name, props) => [`${value} ${props.payload.enhed} (${props.payload.perDag}/dag)`, 'Solgt']}
+                    />
+                    <Bar dataKey="solgt" radius={[0, 3, 3, 0]}>
+                      {rangeringData.map((entry, i) => <Cell key={i} fill={FARVER[i % FARVER.length]} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            {/* ---- 9: Sammenlign restauranter ---- */}
+            <div style={{ marginBottom: 36 }}>
+              <div className="print-report-section-title">Sammenlign restauranter</div>
+              {sammenligningNote ? (
+                <div className="compare-empty-note">Du skal have mere end én restaurant for at sammenligne. Tilføj en restaurant under Indstillinger.</div>
+              ) : (
+                <div className="compare-empty-note">Sammenligning på tværs af restauranter kræver at data er indlæst for alle — skift til en anden restaurant-fane og tilbage for at opdatere. <em>(Fuld sammenligning på tværs af restauranter kommer i næste opdatering.)</em></div>
+              )}
+              {/* Show current restaurant data as reference */}
+              {rangeringData.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <div className="compare-empty-note" style={{ marginBottom: 8 }}>Nuværende restaurant — forbrug pr. dag:</div>
+                  <ResponsiveContainer width="100%" height={Math.max(200, rangeringData.length * 36)}>
+                    <BarChart layout="vertical" data={rangeringData.filter(d => d.perDag > 0)} margin={{ top: 0, right: 60, left: 10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#DEDCD3" horizontal={false} />
+                      <XAxis type="number" tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} />
+                      <YAxis type="category" dataKey="navn" tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} width={140} />
+                      <Tooltip contentStyle={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} formatter={(v, n, p) => [`${v} ${p.payload.enhed}/dag`, 'Pr. dag']} />
+                      <Bar dataKey="perDag" fill="#3D7A4F" radius={[0, 3, 3, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+
+            {/* ---- 10: Sæsonudsving heatmap ---- */}
+            <div style={{ marginBottom: 36 }}>
+              <div className="print-report-section-title">Sæsonudsving — solgt pr. måned</div>
+              <div className="compare-empty-note" style={{ marginBottom: 10 }}>Mørkere farve = højere forbrug den måned. Kræver optællinger spredt over flere måneder.</div>
+              {maaneder.length < 2 ? (
+                <div className="compare-empty-note">Ikke nok data — du skal have optællinger i mindst to forskellige måneder.</div>
+              ) : saesonData.length === 0 ? (
+                <div className="compare-empty-note">Ingen forbrugsdata at vise.</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Vare</th>
+                        {maaneder.map(m => <th key={m} className="num">{fmtMaaned(m)}</th>)}
+                        <th className="num">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {saesonData.map(it => {
+                        const max = Math.max(...it.maaneder.map(m => m.solgt));
+                        const total = it.maaneder.reduce((s, m) => s + m.solgt, 0);
+                        return (
+                          <tr key={it.navn}>
+                            <td className="item-name">{it.navn}</td>
+                            {it.maaneder.map((m, i) => (
+                              <td key={i} className="num" style={{ background: heatmapFarve(m.solgt, max), color: m.solgt / max > 0.5 ? 'white' : 'var(--ink)', fontWeight: m.solgt > 0 ? 600 : 400, padding: '8px 10px' }}>
+                                {m.solgt > 0 ? m.solgt : '—'}
+                              </td>
+                            ))}
+                            <td className="num" style={{ fontWeight: 700 }}>{total}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
   function renderIndstillinger() {
     return (
       <div>
@@ -1286,6 +1487,7 @@ function MainApp({ session }) {
           <button className={`vt-btn ${view === 'lager' ? 'active' : ''}`} onClick={() => setView('lager')}>Lager</button>
           <button className={`vt-btn ${view === 'historik' ? 'active' : ''}`} onClick={() => setView('historik')}>Historik</button>
           <button className={`vt-btn ${view === 'sammenligning' ? 'active' : ''}`} onClick={() => setView('sammenligning')}>Sammenligning</button>
+          <button className={`vt-btn ${view === 'analyse' ? 'active' : ''}`} onClick={() => setView('analyse')}>Analyse</button>
           <button className={`vt-btn ${view === 'indstillinger' ? 'active' : ''}`} onClick={() => setView('indstillinger')}>Indstillinger</button>
         </div>
 
@@ -1293,6 +1495,7 @@ function MainApp({ session }) {
           {view === 'lager' && renderLager()}
           {view === 'historik' && renderHistorik()}
           {view === 'sammenligning' && renderSammenligning()}
+          {view === 'analyse' && renderAnalyse()}
           {view === 'indstillinger' && renderIndstillinger()}
         </div>
 
