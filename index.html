@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lagersystem</title>
+<link rel="icon" href="data:,">
+
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- React + Babel -->
+<script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js" crossorigin></script>
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* ---- CONFIG NOTE ------------------------------------------------
+     Replace the two placeholder values below with your real Supabase
+     credentials (Project Settings → API in Supabase dashboard):
+       SUPABASE_URL  → "Project URL"
+       SUPABASE_KEY  → "anon public" key
+     ----------------------------------------------------------------- */
+
+  :root {
+    --paper: #FAFAF7;
+    --paper-dim: #F0EFE9;
+    --ink: #1C1B19;
+    --ink-soft: #5C5A54;
+    --rust: #C4501C;
+    --rust-dim: #E8D4C8;
+    --good: #3D7A4F;
+    --good-bg: #E4EEE5;
+    --low: #B8842E;
+    --low-bg: #F5EAD4;
+    --crit: #B23B3B;
+    --crit-bg: #F3E0DD;
+    --line: #DEDCD3;
+  }
+
+  * { box-sizing: border-box; }
+
+  body { margin: 0; background: var(--paper); }
+
+  #app {
+    font-family: 'IBM Plex Mono', monospace;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  /* LOGIN */
+  .login-wrap {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: var(--ink); padding: 20px;
+  }
+  .login-box {
+    background: var(--paper); border-radius: 6px; padding: 36px 32px;
+    width: 100%; max-width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  .login-brand { font-family: 'Oswald', sans-serif; font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+  .login-brand span { color: var(--rust); }
+  .login-sub { font-size: 12px; color: var(--ink-soft); margin-bottom: 28px; }
+  .login-field { margin-bottom: 16px; }
+  .login-field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); margin-bottom: 5px; }
+  .login-field input {
+    width: 100%; font-family: 'IBM Plex Mono', monospace; font-size: 14px; border: 1px solid var(--line);
+    background: var(--paper); padding: 10px 12px; border-radius: 3px;
+  }
+  .login-field input:focus { outline: none; border-color: var(--ink); }
+  .login-btn {
+    width: 100%; font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 700;
+    background: var(--rust); color: white; border: none; padding: 12px; border-radius: 3px;
+    cursor: pointer; margin-top: 8px;
+  }
+  .login-btn:hover { opacity: 0.88; }
+  .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .login-error { color: var(--crit); font-size: 12.5px; margin-top: 10px; text-align: center; }
+
+  /* TOPBAR */
+  .topbar {
+    border-bottom: 3px solid var(--ink); padding: 16px 24px 12px;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand-mark { font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 22px; }
+  .brand-mark span { color: var(--rust); }
+  .brand-sub { font-size: 11px; color: var(--ink-soft); letter-spacing: 0.04em; }
+  .topbar-right { display: flex; gap: 8px; align-items: center; }
+
+  /* NAV */
+  .nav { display: flex; border-bottom: 1px solid var(--line); overflow-x: auto; align-items: center; }
+  .nav-btn {
+    font-family: 'Oswald', sans-serif; text-transform: uppercase; letter-spacing: 0.03em;
+    font-size: 13px; font-weight: 500; background: none; border: none;
+    border-right: 1px solid var(--line); padding: 11px 18px; cursor: pointer;
+    color: var(--ink-soft); white-space: nowrap;
+  }
+  .nav-btn:hover { background: var(--paper-dim); color: var(--ink); }
+  .nav-btn.active { color: var(--ink); background: var(--paper-dim); box-shadow: inset 0 -3px 0 var(--rust); }
+  .nav-add {
+    margin-left: auto; margin-right: 14px; font-size: 12px; background: none;
+    border: 1px dashed var(--line); border-radius: 4px; padding: 6px 12px;
+    cursor: pointer; color: var(--ink-soft); white-space: nowrap;
+  }
+  .nav-add:hover { border-color: var(--ink); color: var(--ink); }
+
+  .view-tabs { display: flex; gap: 6px; padding: 12px 24px 0; flex-wrap: wrap; }
+  .vt-btn {
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; background: var(--paper);
+    border: 1px solid var(--line); border-bottom: none; padding: 7px 14px; cursor: pointer;
+    color: var(--ink-soft); border-radius: 4px 4px 0 0; position: relative; top: 1px;
+  }
+  .vt-btn.active { color: var(--ink); background: var(--paper-dim); font-weight: 600; }
+
+  .panel { padding: 18px 24px 60px; }
+
+  /* TYPOGRAPHY */
+  .eyebrow { font-size: 10.5px; letter-spacing: 0.08em; color: var(--ink-soft); text-transform: uppercase; margin-bottom: 4px; }
+  .section-title {
+    font-family: 'Oswald', sans-serif; text-transform: uppercase; font-size: 19px; font-weight: 600;
+    margin: 0 0 14px; display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap;
+  }
+  .section-title-left { display: flex; align-items: center; gap: 10px; }
+  .item-name { font-weight: 600; }
+  .item-cat { font-size: 11px; color: var(--ink-soft); }
+  .delta { font-weight: 700; }
+  .delta.used { color: var(--rust); }
+  .delta.zero { color: var(--ink-soft); }
+
+  /* TAGS */
+  .tag {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 7px;
+    border-radius: 3px; font-weight: 600; display: inline-block;
+  }
+  .tag.good { background: var(--good-bg); color: var(--good); }
+  .tag.low { background: var(--low-bg); color: var(--low); }
+  .tag.crit { background: var(--crit-bg); color: var(--crit); }
+  .tag.rust { background: var(--rust-dim); color: var(--rust); }
+
+  /* TABLE */
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--ink-soft); font-weight: 500; padding: 0 10px 8px; border-bottom: 2px solid var(--ink);
+  }
+  thead th.num { text-align: right; }
+  tbody td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:hover { background: var(--paper-dim); }
+
+  /* BUTTONS */
+  .btn {
+    font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; font-weight: 600; border: 1px solid var(--ink);
+    background: var(--ink); color: var(--paper); padding: 8px 14px; cursor: pointer; border-radius: 3px;
+  }
+  .btn:hover { opacity: 0.82; }
+  .btn.ghost { background: transparent; color: var(--ink); }
+  .btn.rust { background: var(--rust); border-color: var(--rust); color: white; }
+  .btn.small { padding: 5px 10px; font-size: 11.5px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .icon-btn {
+    width: 26px; height: 26px; border: 1px solid var(--line); background: var(--paper); border-radius: 3px;
+    cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; color: var(--ink-soft);
+  }
+  .icon-btn:hover { border-color: var(--ink); color: var(--ink); }
+
+  /* TOOLBAR */
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+  .search-box {
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px; border: 1px solid var(--line);
+    background: var(--paper); padding: 8px 12px; border-radius: 3px; width: 220px;
+  }
+  .search-box:focus { outline: none; border-color: var(--ink); }
+
+  /* MODAL */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(28,27,25,0.45); display: flex;
+    align-items: center; justify-content: center; z-index: 50; padding: 16px;
+  }
+  .modal {
+    background: var(--paper); border: 1px solid var(--ink); border-radius: 5px;
+    width: 100%; max-width: 460px; max-height: 88vh; overflow-y: auto;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.25);
+  }
+  .modal.wide { max-width: 640px; }
+  .modal-head { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+  .modal-title { font-family: 'Oswald', sans-serif; text-transform: uppercase; font-size: 16px; font-weight: 600; }
+  .modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--ink-soft); }
+  .modal-body { padding: 18px 20px; }
+  .modal-foot { padding: 14px 20px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); margin-bottom: 5px; }
+  .field input, .field select, .field textarea {
+    width: 100%; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px;
+    border: 1px solid var(--line); background: var(--paper); padding: 9px 10px; border-radius: 3px;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--ink); }
+  .field-row { display: flex; gap: 10px; }
+  .field-row .field { flex: 1; }
+  .hint { font-size: 11.5px; color: var(--ink-soft); margin-top: -8px; margin-bottom: 14px; }
+
+  /* STOCKTAKE MODAL */
+  .opt-toolbar {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px;
+    position: sticky; top: 0; background: var(--paper); padding: 6px 0; z-index: 2;
+  }
+  .opt-filter-toggle {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; background: var(--paper);
+    border: 1px solid var(--line); border-radius: 3px; padding: 6px 10px; cursor: pointer; color: var(--ink-soft);
+  }
+  .opt-filter-toggle.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .opt-progress { font-size: 11.5px; color: var(--ink-soft); margin-left: auto; }
+  .kategori-group { margin-top: 4px; }
+  .kategori-head {
+    display: flex; align-items: center; gap: 8px; padding: 10px 0 6px; cursor: pointer;
+    font-family: 'Oswald', sans-serif; text-transform: uppercase; font-size: 13px; font-weight: 600;
+    color: var(--ink-soft); border-bottom: 1px solid var(--line);
+  }
+  .kategori-head .chevron { transition: transform 0.15s; font-size: 11px; }
+  .kategori-head.collapsed .chevron { transform: rotate(-90deg); }
+  .kategori-count { font-family: 'IBM Plex Mono', monospace; font-weight: 400; font-size: 11px; color: var(--ink-soft); margin-left: auto; }
+  .count-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .count-row.is-counted { background: var(--good-bg); }
+  .count-row-name { flex: 1; }
+  .count-row-name .item-name { font-size: 13.5px; }
+  .count-input { width: 90px; text-align: right; }
+  .count-input-small { width: 64px; text-align: right; }
+  .count-pakke-group { display: flex; align-items: center; gap: 6px; }
+  .count-pakke-group .unit-label { font-size: 10.5px; color: var(--ink-soft); }
+  .conversion-hint { font-size: 11px; color: var(--ink-soft); margin-top: 5px; }
+
+  /* HISTORY */
+  .history-list { display: flex; flex-direction: column; }
+  .history-row {
+    display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line);
+    font-size: 12.5px; align-items: baseline; cursor: pointer;
+  }
+  .history-row:hover { background: var(--paper-dim); }
+  .history-date { font-weight: 700; min-width: 110px; }
+  .history-type {
+    font-size: 10px; text-transform: uppercase; padding: 2px 7px; border-radius: 3px;
+    font-weight: 700; min-width: 78px; text-align: center;
+  }
+  .history-type.optaelling { background: var(--rust-dim); color: var(--rust); }
+  .history-type.levering { background: var(--good-bg); color: var(--good); }
+  .history-type.spild { background: var(--crit-bg); color: var(--crit); }
+  .history-type.pos { background: var(--low-bg); color: var(--low); }
+  .history-who { color: var(--ink-soft); font-size: 11px; }
+
+  /* COMPARISON */
+  .compare-table { overflow-x: auto; }
+  .compare-table table { min-width: 600px; }
+  .compare-table th.month-col, .compare-table td.month-col { text-align: right; min-width: 78px; }
+  .compare-cell-up { color: var(--crit); }
+  .compare-cell-down { color: var(--good); }
+  .compare-empty-note { font-size: 11px; color: var(--ink-soft); }
+
+  /* PERIODE TOOLBAR */
+  .periode-toolbar {
+    display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
+    background: var(--paper-dim); border: 1px solid var(--line); border-radius: 5px;
+    padding: 12px 14px; margin-bottom: 18px;
+  }
+  .periode-toolbar .field { margin-bottom: 0; }
+  .periode-toolbar input[type="date"] { width: 150px; }
+
+  /* EXPORT DROPDOWN */
+  .export-wrap { position: relative; display: inline-block; }
+  .export-menu {
+    position: absolute; right: 0; top: calc(100% + 4px); background: var(--paper);
+    border: 1px solid var(--ink); border-radius: 4px; min-width: 220px; z-index: 10;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.15); overflow: hidden;
+  }
+  .export-menu button {
+    display: block; width: 100%; text-align: left; padding: 9px 12px; font-size: 12.5px;
+    font-family: 'IBM Plex Mono', monospace; background: none; border: none;
+    border-bottom: 1px solid var(--line); cursor: pointer; color: var(--ink);
+  }
+  .export-menu button:last-child { border-bottom: none; }
+  .export-menu button:hover { background: var(--paper-dim); }
+
+  /* STATUS */
+  .banner {
+    background: var(--paper-dim); border: 1px dashed var(--line); border-radius: 4px;
+    padding: 10px 14px; font-size: 11.5px; color: var(--ink-soft); margin-bottom: 18px;
+    display: flex; gap: 8px; align-items: flex-start;
+  }
+  .banner.reminder { border-color: var(--low); background: var(--low-bg); color: var(--low); }
+
+  /* EMPTY STATE */
+  .empty-state { text-align: center; padding: 50px 20px; color: var(--ink-soft); }
+  .empty-state .display { font-family: 'Oswald', sans-serif; text-transform: uppercase; font-size: 16px; margin-bottom: 6px; color: var(--ink); }
+
+  /* LOADING SPINNER */
+  .spinner-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: var(--ink-soft); font-size: 13px; }
+
+  /* PRINT */
+  .print-report { display: none; }
+  body.printing-report .print-report { display: block; padding: 32px; }
+  body.printing-report .app-shell { display: none; }
+  .print-report-head { margin-bottom: 18px; }
+  .print-report-head h1 { font-family: 'Oswald', sans-serif; font-size: 22px; margin: 0 0 4px; text-transform: uppercase; }
+  .print-report-meta { font-size: 12px; color: var(--ink-soft); }
+  .print-report-section-title { font-family: 'Oswald', sans-serif; text-transform: uppercase; font-size: 14px; font-weight: 600; margin: 22px 0 8px; }
+  .print-report-empty { font-size: 12px; color: var(--ink-soft); padding: 10px 0; }
+  @media print {
+    body.printing-report .print-report { display: block; }
+    .no-print { display: none !important; }
+  }
+
+  /* MOBILE */
+  @media (max-width: 640px) {
+    .panel { padding: 14px 14px 50px; }
+    .topbar { padding: 14px 14px 12px; }
+    .count-input, .count-input-small { font-size: 16px; padding: 10px 8px; }
+    .count-row { padding: 12px 0; }
+    .count-pakke-group { gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .count-input-small { width: 56px; }
+    .lager-table thead th:nth-child(2), .lager-table tbody td:nth-child(2),
+    .lager-table thead th:nth-child(6), .lager-table tbody td:nth-child(6),
+    .lager-table thead th:nth-child(7), .lager-table tbody td:nth-child(7) { display: none; }
+  }
+
+  ::placeholder { color: #B5B2A8; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="text/babel">
+// ================================================================
+// CONFIGURATION — replace these two values with your Supabase credentials
+// Project Settings → API in the Supabase dashboard
+// ================================================================
+const SUPABASE_URL = 'https://cwoypysllnyncvoxuvkc.supabase.co/rest/v1/';
+const SUPABASE_KEY = 'sb_secret_0tjIVyI1q4Dz_qw10zRUvg_Zjm27Ust';
+// ================================================================
+
+const { useState, useEffect, useCallback, useRef } = React;
+const supabase = Supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ---- Helpers ----
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function nowISO() { return new Date().toISOString(); }
+function fmtDateShort(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('da-DK', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+function fmtDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('da-DK', { day: '2-digit', month: 'short' }) + ' kl. ' + d.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' });
+}
+function fmtPakkeLoese(vare, antalPakker, antalLoese) {
+  if (!vare) return '';
+  const p = antalPakker || 0, l = antalLoese || 0;
+  if (vare.pakke_str && vare.pakke_antal && p > 0) {
+    return l > 0 ? `${p} ${vare.pakke_str} + ${l} ${vare.enhed}` : `${p} ${vare.pakke_str}`;
+  }
+  return `${l} ${vare.enhed}`;
+}
+function harPakke(vare) {
+  return !!(vare && vare.pakke_str && vare.pakke_antal && vare.pakke_antal > 0);
+}
+function toStkCombo(vare, antalPakker, antalLoese) {
+  const p = parseFloat(antalPakker), l = parseFloat(antalLoese);
+  const pVal = isNaN(p) ? 0 : p, lVal = isNaN(l) ? 0 : l;
+  if (isNaN(p) && isNaN(l)) return null;
+  if (harPakke(vare)) return +(pVal * vare.pakke_antal + lVal).toFixed(3);
+  return lVal;
+}
+function daysSince(dateStr) {
+  return Math.floor((new Date(todayStr()) - new Date(dateStr)) / 86400000);
+}
+function fmtMaaned(m) {
+  const navne = ['Jan','Feb','Mar','Apr','Maj','Jun','Jul','Aug','Sep','Okt','Nov','Dec'];
+  const [aar, maaned] = m.split('-');
+  return `${navne[parseInt(maaned, 10) - 1]} ${aar}`;
+}
+
+// ---- CSV export ----
+function csvCelle(v) {
+  const s = (v === null || v === undefined) ? '' : String(v);
+  if (/[;"\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+function downloadCSV(filnavn, raekker) {
+  const csv = raekker.map(r => r.map(csvCelle).join(';')).join('\r\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filnavn;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+// ---- POS text parsing ----
+function parsePosTekst(raaTekst) {
+  const linjer = raaTekst.split('\n').map(l => l.trim()).filter(Boolean);
+  const resultater = [];
+  linjer.forEach(linje => {
+    let dele = linje.split('\t').map(s => s.trim()).filter(Boolean);
+    let navn, antalStr;
+    if (dele.length >= 2 && /-?\d/.test(dele[1])) { navn = dele[0]; antalStr = dele[1]; }
+    else {
+      const match = linje.match(/^(.*?)([\d.,]+)\s*(?:stk|x)?\.?\s*$/i);
+      if (match) { navn = match[1].trim(); antalStr = match[2]; }
+    }
+    if (!navn || antalStr === undefined) return;
+    let cleaned = antalStr.replace(/\s/g, '');
+    const harKomma = cleaned.includes(','), harPunktum = cleaned.includes('.');
+    if (harKomma && harPunktum) { cleaned = cleaned.replace(/\./g, '').replace(',', '.'); }
+    else if (harKomma) { cleaned = cleaned.replace(',', '.'); }
+    else if (harPunktum) { const ep = cleaned.split('.').pop(); if (ep.length === 3) cleaned = cleaned.replace(/\./g, ''); }
+    const antal = parseFloat(cleaned);
+    if (!navn || isNaN(antal)) return;
+    resultater.push({ raaNavn: navn, antal });
+  });
+  return resultater;
+}
+function normaliserNavn(s) { return (s || '').toLowerCase().replace(/[^a-z0-9æøå]+/g, ' ').trim(); }
+function matchScore(a, b) {
+  const na = normaliserNavn(a), nb = normaliserNavn(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (nb.includes(na) || na.includes(nb)) return 0.85;
+  const aO = na.split(' ').filter(Boolean), bO = nb.split(' ').filter(Boolean);
+  if (!aO.length || !bO.length) return 0;
+  return aO.filter(o => bO.includes(o)).length / Math.max(aO.length, bO.length);
+}
+function matchPosLinjer(linjer, varer) {
+  return linjer.map(l => {
+    let bedste = null, bedsteScore = 0;
+    varer.forEach(v => { const s = matchScore(l.raaNavn, v.navn); if (s > bedsteScore) { bedsteScore = s; bedste = v; } });
+    return { ...l, vareId: bedsteScore >= 0.34 ? (bedste ? bedste.id : null) : null, sikker: bedsteScore >= 0.7 };
+  });
+}
+
+// ================================================================
+// SUPABASE DATA LAYER
+// ================================================================
+async function dbLoadAll(restaurantId) {
+  const [
+    { data: varer }, { data: optaellinger }, { data: leverancer },
+    { data: spild }, { data: posTal }
+  ] = await Promise.all([
+    supabase.from('varer').select('*').eq('restaurant_id', restaurantId).order('navn'),
+    supabase.from('optaellinger').select('*').eq('restaurant_id', restaurantId).order('dato'),
+    supabase.from('leverancer').select('*').eq('restaurant_id', restaurantId).order('dato', { ascending: false }),
+    supabase.from('spild').select('*').eq('restaurant_id', restaurantId).order('dato', { ascending: false }),
+    supabase.from('pos_tal').select('*').eq('restaurant_id', restaurantId).order('dato', { ascending: false }),
+  ]);
+  return { varer: varer || [], optaellinger: optaellinger || [], leverancer: leverancer || [], spild: spild || [], posTal: posTal || [] };
+}
+
+// ================================================================
+// APP
+// ================================================================
+function App() {
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false); });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (authLoading) return <div className="spinner-wrap">Indlæser…</div>;
+  if (!session) return <LoginScreen />;
+  return <MainApp session={session} />;
+}
+
+// ================================================================
+// LOGIN
+// ================================================================
+function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    setLoading(true); setError('');
+    const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
+    if (error) setError('Forkert e-mail eller adgangskode.');
+    setLoading(false);
+  }
+
+  return (
+    <div className="login-wrap">
+      <div className="login-box">
+        <div className="login-brand">LAGER<span>/</span>SYSTEM</div>
+        <div className="login-sub">Log ind for at fortsætte</div>
+        <form onSubmit={handleLogin}>
+          <div className="login-field"><label>E-mail</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="din@email.dk" required autoFocus /></div>
+          <div className="login-field"><label>Adgangskode</label><input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="••••••••" required /></div>
+          {error && <div className="login-error">{error}</div>}
+          <button className="login-btn" type="submit" disabled={loading}>{loading ? 'Logger ind…' : 'Log ind'}</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ================================================================
+// MAIN APP
+// ================================================================
+function MainApp({ session }) {
+  const [restauranter, setRestauranter] = useState([]);
+  const [activeRestId, setActiveRestId] = useState(null);
+  const [restData, setRestData] = useState({ varer: [], optaellinger: [], leverancer: [], spild: [], posTal: [] });
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState('lager');
+  const [search, setSearch] = useState('');
+  const [modal, setModal] = useState(null);
+  const [printView, setPrintView] = useState(null);
+  const [periodeFra, setPeriodeFra] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
+  const [periodeTil, setPeriodeTil] = useState(todayStr());
+  const [eksportMenuAaben, setEksportMenuAaben] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Load restaurants on mount
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from('restauranter').select('*').order('navn');
+      setRestauranter(data || []);
+      if (data && data.length > 0) setActiveRestId(data[0].id);
+      else setLoading(false);
+    })();
+  }, []);
+
+  // Load data when restaurant changes
+  useEffect(() => {
+    if (!activeRestId) return;
+    setLoading(true);
+    dbLoadAll(activeRestId).then(data => { setRestData(data); setLoading(false); });
+  }, [activeRestId]);
+
+  // Print effect — before early returns (Rules of Hooks)
+  useEffect(() => {
+    if (!printView) return;
+    document.body.classList.add('printing-report');
+    const cleanup = () => { document.body.classList.remove('printing-report'); setPrintView(null); window.removeEventListener('afterprint', cleanup); };
+    window.addEventListener('afterprint', cleanup);
+    const t = setTimeout(() => window.print(), 50);
+    return () => { clearTimeout(t); window.removeEventListener('afterprint', cleanup); };
+  }, [printView]);
+
+  // Close export menu on outside click
+  useEffect(() => {
+    if (!eksportMenuAaben) return;
+    const handler = (e) => { if (!e.target.closest('.export-wrap')) setEksportMenuAaben(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [eksportMenuAaben]);
+
+  const restNavn = (id) => (restauranter.find(r => r.id === id) || {}).navn || '';
+  const vareById = (id) => restData.varer.find(v => v.id === id);
+  const varerForRest = restData.varer;
+
+  // ---- Data helpers ----
+  function getOptaellingerSorted() { return [...restData.optaellinger].sort((a, b) => a.dato.localeCompare(b.dato)); }
+
+  function getLatestCount(vareId) {
+    const opts = getOptaellingerSorted();
+    for (let i = opts.length - 1; i >= 0; i--) {
+      const c = opts[i].counts && opts[i].counts[vareId];
+      if (c !== undefined) {
+        const stk = typeof c === 'object' ? c.stk : c;
+        return { stk, antalPakker: typeof c === 'object' ? c.antalPakker : undefined, antalLoese: typeof c === 'object' ? c.antalLoese : undefined, dato: opts[i].dato };
+      }
+    }
+    return null;
+  }
+
+  function computeForbrug() {
+    const opts = getOptaellingerSorted();
+    const result = {};
+    varerForRest.forEach(it => {
+      const relevantOpts = opts.filter(o => o.counts && o.counts[it.id] !== undefined);
+      if (relevantOpts.length < 2) { result[it.id] = null; return; }
+      const prev = relevantOpts[relevantOpts.length - 2];
+      const last = relevantOpts[relevantOpts.length - 1];
+      const leveret = restData.leverancer.filter(l => l.vare_id === it.id && l.dato > prev.dato && l.dato <= last.dato).reduce((s, l) => s + l.antal_stk, 0);
+      const spildTotal = restData.spild.filter(sp => sp.vare_id === it.id && sp.dato > prev.dato && sp.dato <= last.dato).reduce((s, sp) => s + sp.antal_stk, 0);
+      const prevVal = typeof prev.counts[it.id] === 'object' ? prev.counts[it.id].stk : prev.counts[it.id];
+      const lastVal = typeof last.counts[it.id] === 'object' ? last.counts[it.id].stk : last.counts[it.id];
+      const forbrugTotal = prevVal + leveret - lastVal;
+      const solgt = forbrugTotal - spildTotal;
+      const dage = Math.max(1, Math.round((new Date(last.dato) - new Date(prev.dato)) / 86400000));
+      result[it.id] = { forbrugTotal, solgt, spild: spildTotal, leveret, fra: prev.dato, til: last.dato, dage, perDag: +(solgt / dage).toFixed(2) };
+    });
+    return result;
+  }
+
+  function computeMaanedsForbrug() {
+    const opts = getOptaellingerSorted();
+    const perVare = {}, alleMaaneder = new Set();
+    varerForRest.forEach(it => {
+      perVare[it.id] = {};
+      const relevantOpts = opts.filter(o => o.counts && o.counts[it.id] !== undefined);
+      for (let i = 1; i < relevantOpts.length; i++) {
+        const prev = relevantOpts[i - 1], last = relevantOpts[i];
+        const leveret = restData.leverancer.filter(l => l.vare_id === it.id && l.dato > prev.dato && l.dato <= last.dato).reduce((s, l) => s + l.antal_stk, 0);
+        const spildTotal = restData.spild.filter(sp => sp.vare_id === it.id && sp.dato > prev.dato && sp.dato <= last.dato).reduce((s, sp) => s + sp.antal_stk, 0);
+        const prevVal = typeof prev.counts[it.id] === 'object' ? prev.counts[it.id].stk : prev.counts[it.id];
+        const lastVal = typeof last.counts[it.id] === 'object' ? last.counts[it.id].stk : last.counts[it.id];
+        const solgt = (prevVal + leveret - lastVal) - spildTotal;
+        const maanedKey = last.dato.slice(0, 7);
+        alleMaaneder.add(maanedKey);
+        perVare[it.id][maanedKey] = (perVare[it.id][maanedKey] || 0) + solgt;
+      }
+    });
+    return { perVare, maaneder: Array.from(alleMaaneder).sort() };
+  }
+
+  function vurderLagerstatus(latest, forbrugEntry) {
+    if (!latest || !forbrugEntry || !forbrugEntry.perDag || forbrugEntry.perDag <= 0) return null;
+    const dageTilbage = latest.stk / forbrugEntry.perDag;
+    const niveau = dageTilbage < 7 ? 'crit' : dageTilbage < 14 ? 'low' : 'good';
+    return { dageTilbage: Math.round(dageTilbage), niveau };
+  }
+
+  function getOptaellingsStatus() {
+    const opts = getOptaellingerSorted();
+    if (opts.length === 0) return { aldrigTalt: true, dage: null };
+    const sidst = opts[opts.length - 1];
+    return { aldrigTalt: false, dage: daysSince(sidst.dato), dato: sidst.dato };
+  }
+
+  // ---- Supabase mutations ----
+  async function reloadData() {
+    const data = await dbLoadAll(activeRestId);
+    setRestData(data);
+  }
+
+  async function addRestaurant(navn) {
+    setSaving(true);
+    const { data } = await supabase.from('restauranter').insert({ navn }).select().single();
+    if (data) { setRestauranter(prev => [...prev, data]); setActiveRestId(data.id); }
+    setSaving(false);
+  }
+  async function updateRestaurant(id, navn) {
+    setSaving(true);
+    await supabase.from('restauranter').update({ navn }).eq('id', id);
+    setRestauranter(prev => prev.map(r => r.id === id ? { ...r, navn } : r));
+    setSaving(false);
+  }
+  async function deleteRestaurant(id) {
+    setSaving(true);
+    await supabase.from('restauranter').delete().eq('id', id);
+    const remaining = restauranter.filter(r => r.id !== id);
+    setRestauranter(remaining);
+    if (activeRestId === id) setActiveRestId(remaining[0]?.id || null);
+    setSaving(false);
+  }
+
+  async function addVare(vare) {
+    setSaving(true);
+    await supabase.from('varer').insert({ ...vare, restaurant_id: activeRestId });
+    await reloadData();
+    setSaving(false);
+  }
+  async function updateVare(id, updates) {
+    setSaving(true);
+    await supabase.from('varer').update(updates).eq('id', id);
+    await reloadData();
+    setSaving(false);
+  }
+  async function deleteVare(id) {
+    setSaving(true);
+    await supabase.from('varer').delete().eq('id', id);
+    await reloadData();
+    setSaving(false);
+  }
+
+  async function addLevering(entry) {
+    setSaving(true);
+    await supabase.from('leverancer').insert({ ...entry, restaurant_id: activeRestId });
+    await reloadData();
+    setSaving(false);
+  }
+  async function addSpild(entry) {
+    setSaving(true);
+    await supabase.from('spild').insert({ ...entry, restaurant_id: activeRestId });
+    await reloadData();
+    setSaving(false);
+  }
+  async function addOptaelling(entry) {
+    setSaving(true);
+    await supabase.from('optaellinger').insert({ ...entry, restaurant_id: activeRestId });
+    await reloadData();
+    setSaving(false);
+  }
+  async function updateOptaelling(id, updates) {
+    setSaving(true);
+    await supabase.from('optaellinger').update({ ...updates, redigeret: nowISO() }).eq('id', id);
+    await reloadData();
+    setSaving(false);
+  }
+  async function deleteOptaelling(id) {
+    setSaving(true);
+    await supabase.from('optaellinger').delete().eq('id', id);
+    await reloadData();
+    setSaving(false);
+  }
+  async function addPosTal(entries) {
+    setSaving(true);
+    await supabase.from('pos_tal').insert(entries.map(e => ({ ...e, restaurant_id: activeRestId })));
+    await reloadData();
+    setSaving(false);
+  }
+
+  // ---- Modal handlers ----
+  function openAddRest() { setModal({ type: 'rest-add', navn: '' }); }
+  function openEditRest(r) { setModal({ type: 'rest-edit', id: r.id, navn: r.navn }); }
+
+  function openAddItem() { setModal({ type: 'vare-add', navn: '', kategori: '', enhed: 'stk', brugPakke: false, pakkeStr: '', pakkeAntal: '' }); }
+  function openEditItem(it) { setModal({ type: 'vare-edit', item: { ...it }, brugPakke: harPakke(it) }); }
+
+  function openAddDelivery(it) {
+    setModal({ type: 'levering', vareId: it ? it.id : (varerForRest[0]?.id || ''), antalPakker: '', antalLoese: '', dato: todayStr(), note: '', hvem: '' });
+  }
+  function openAddSpild(it) {
+    setModal({ type: 'spild', vareId: it ? it.id : (varerForRest[0]?.id || ''), antalPakker: '', antalLoese: '', dato: todayStr(), note: '', hvem: '' });
+  }
+  function openNewOptaelling() {
+    const counts = {};
+    varerForRest.forEach(it => { counts[it.id] = { pakker: '', loese: '' }; });
+    setModal({ type: 'optaelling', dato: todayStr(), counts, note: '', hvem: '', redigerId: null, kunManglende: false, lukkedeKategorier: {} });
+  }
+  function openEditOptaelling(entry) {
+    const counts = {};
+    varerForRest.forEach(it => {
+      const c = entry.counts?.[it.id];
+      if (c === undefined) counts[it.id] = { pakker: '', loese: '' };
+      else if (typeof c === 'object') counts[it.id] = { pakker: c.antalPakker ? String(c.antalPakker) : '', loese: c.antalLoese !== undefined ? String(c.antalLoese) : '' };
+      else counts[it.id] = { pakker: '', loese: String(c) };
+    });
+    setModal({ type: 'optaelling', dato: entry.dato, counts, note: entry.note || '', hvem: entry.hvem || '', redigerId: entry.id, kunManglende: false, lukkedeKategorier: {} });
+  }
+  function openPosIndsaet() { setModal({ type: 'pos-indsaet', trin: 'indtast', raaTekst: '', dato: todayStr(), matchede: [] }); }
+  function openHistoryDetail(entry, typeLabel) { setModal({ type: 'historik-detalje', entry, typeLabel }); }
+
+  // ---- Submit handlers ----
+  async function submitAddRest() {
+    if (!modal.navn.trim()) return;
+    await addRestaurant(modal.navn.trim());
+    setModal(null);
+  }
+  async function submitEditRest() {
+    if (!modal.navn.trim()) return;
+    await updateRestaurant(modal.id, modal.navn.trim());
+    setModal(null);
+  }
+  async function handleDeleteRest(r) {
+    if (restauranter.length <= 1) { alert('Du skal have mindst én restaurant.'); return; }
+    if (!confirm(`Slet "${r.navn}"? Al data for denne restaurant slettes. Kan ikke fortrydes.`)) return;
+    await deleteRestaurant(r.id);
+    setModal(null);
+  }
+
+  async function submitAddItem() {
+    if (!modal.navn.trim()) return;
+    await addVare({ navn: modal.navn.trim(), kategori: modal.kategori.trim() || 'Andet', enhed: modal.enhed || 'stk', pakke_str: modal.brugPakke ? (modal.pakkeStr.trim() || 'ramme') : '', pakke_antal: modal.brugPakke ? (parseFloat(modal.pakkeAntal) || null) : null });
+    setModal(null);
+  }
+  async function submitEditItem() {
+    const it = { ...modal.item };
+    if (!modal.brugPakke) { it.pakke_str = ''; it.pakke_antal = null; } else { it.pakke_antal = parseFloat(it.pakke_antal) || null; }
+    await updateVare(it.id, { navn: it.navn, kategori: it.kategori, enhed: it.enhed, pakke_str: it.pakke_str, pakke_antal: it.pakke_antal });
+    setModal(null);
+  }
+  async function handleDeleteItem(it) {
+    if (!confirm(`Fjern "${it.navn}"?`)) return;
+    await deleteVare(it.id);
+  }
+
+  async function submitLevering() {
+    const vare = vareById(modal.vareId);
+    const antalStk = toStkCombo(vare, modal.antalPakker, modal.antalLoese);
+    if (!antalStk || antalStk <= 0) return;
+    await addLevering({ vare_id: modal.vareId, antal_stk: antalStk, antal_pakker: parseFloat(modal.antalPakker) || 0, antal_loese: parseFloat(modal.antalLoese) || 0, dato: modal.dato || todayStr(), note: modal.note, hvem: modal.hvem || '' });
+    setModal(null);
+  }
+  async function submitSpildEntry() {
+    const vare = vareById(modal.vareId);
+    const antalStk = toStkCombo(vare, modal.antalPakker, modal.antalLoese);
+    if (!antalStk || antalStk <= 0) return;
+    await addSpild({ vare_id: modal.vareId, antal_stk: antalStk, antal_pakker: parseFloat(modal.antalPakker) || 0, antal_loese: parseFloat(modal.antalLoese) || 0, dato: modal.dato || todayStr(), note: modal.note, hvem: modal.hvem || '' });
+    setModal(null);
+  }
+  async function submitOptaelling() {
+    const counts = {};
+    let any = false;
+    varerForRest.forEach(it => {
+      const c = modal.counts[it.id] || {};
+      if ((c.pakker !== '' && c.pakker !== undefined) || (c.loese !== '' && c.loese !== undefined)) {
+        const stk = toStkCombo(it, c.pakker, c.loese);
+        if (stk !== null) { counts[it.id] = { stk, antalPakker: parseFloat(c.pakker) || 0, antalLoese: parseFloat(c.loese) || 0 }; any = true; }
+      }
+    });
+    if (!any) { alert('Indtast mindst ét antal.'); return; }
+    if (modal.redigerId) {
+      await updateOptaelling(modal.redigerId, { dato: modal.dato || todayStr(), counts, note: modal.note, hvem: modal.hvem || '' });
+    } else {
+      await addOptaelling({ dato: modal.dato || todayStr(), counts, note: modal.note, hvem: modal.hvem || '' });
+    }
+    setModal(null);
+  }
+  async function handleDeleteOptaelling(entry) {
+    if (!confirm(`Slet optællingen fra ${fmtDateShort(entry.dato)}? Kan påvirke forbrugsberegninger.`)) return;
+    await deleteOptaelling(entry.id);
+    setModal(null);
+  }
+  function tolkPosTekst() {
+    const linjer = parsePosTekst(modal.raaTekst);
+    if (!linjer.length) { alert('Kunne ikke genkende nogen linjer med både navn og antal.'); return; }
+    setModal({ ...modal, trin: 'bekraeft', matchede: matchPosLinjer(linjer, varerForRest) });
+  }
+  async function submitPosTal() {
+    const gyldige = modal.matchede.filter(m => m.vareId);
+    if (!gyldige.length) { alert('Ingen linjer er tilknyttet en vare.'); return; }
+    await addPosTal(gyldige.map(m => ({ vare_id: m.vareId, antal: m.antal, raa_navn: m.raaNavn, dato: modal.dato || todayStr() })));
+    setModal(null);
+  }
+
+  function printRapport(view) { setPrintView(view); }
+  function doPrint() { window.print(); }
+
+  // ---- Export ----
+  function eksporterAlt() {
+    const forbrug = computeForbrug();
+    const raekker = [['Vare','Kategori','Enhed','Pakke','Styk pr. pakke','Senest talt (stk)','Senest talt dato','Solgt siden sidst','Spild siden sidst','Pr. dag']];
+    varerForRest.forEach(it => {
+      const latest = getLatestCount(it.id), f = forbrug[it.id];
+      raekker.push([it.navn, it.kategori, it.enhed, it.pakke_str || '', it.pakke_antal || '', latest ? latest.stk : '', latest ? latest.dato : '', f ? f.solgt : '', f ? f.spild : '', f ? f.perDag : '']);
+    });
+    downloadCSV(`lageroversigt_${restNavn(activeRestId)}_${todayStr()}.csv`, raekker);
+  }
+  function eksporterOptaellinger() {
+    const raekker = [['Dato','Vare','Kategori','Antal (stk)','Antal rammer','Antal løse','Hvem','Note']];
+    restData.optaellinger.forEach(o => {
+      Object.entries(o.counts || {}).forEach(([vid, c]) => {
+        const it = vareById(vid);
+        const stk = typeof c === 'object' ? c.stk : c;
+        raekker.push([o.dato, it?.navn || '', it?.kategori || '', stk, typeof c === 'object' ? c.antalPakker : '', typeof c === 'object' ? c.antalLoese : '', o.hvem || '', o.note || '']);
+      });
+    });
+    downloadCSV(`optaellinger_${restNavn(activeRestId)}_${todayStr()}.csv`, raekker);
+  }
+  function eksporterLeverancer() {
+    const raekker = [['Dato','Vare','Kategori','Antal (stk)','Antal rammer','Antal løse','Hvem','Note']];
+    restData.leverancer.forEach(l => { const it = vareById(l.vare_id); raekker.push([l.dato, it?.navn || '', it?.kategori || '', l.antal_stk, l.antal_pakker || 0, l.antal_loese || 0, l.hvem || '', l.note || '']); });
+    downloadCSV(`leverancer_${restNavn(activeRestId)}_${todayStr()}.csv`, raekker);
+  }
+  function eksporterSpild() {
+    const raekker = [['Dato','Vare','Kategori','Antal (stk)','Antal rammer','Antal løse','Hvem','Årsag']];
+    restData.spild.forEach(sp => { const it = vareById(sp.vare_id); raekker.push([sp.dato, it?.navn || '', it?.kategori || '', sp.antal_stk, sp.antal_pakker || 0, sp.antal_loese || 0, sp.hvem || '', sp.note || '']); });
+    downloadCSV(`spild_${restNavn(activeRestId)}_${todayStr()}.csv`, raekker);
+  }
+  function eksporterPosTalCSV() {
+    const raekker = [['Dato','Vare','Antal solgt','Tekst fra POS']];
+    restData.posTal.forEach(p => { const it = vareById(p.vare_id); raekker.push([p.dato, it?.navn || '', p.antal, p.raa_navn]); });
+    downloadCSV(`pos_salg_${restNavn(activeRestId)}_${todayStr()}.csv`, raekker);
+  }
+
+  // ---- Print report renderers ----
+  function renderPrintOptaelling(entry) {
+    return (
+      <div>
+        <div className="print-report-head">
+          <h1>Optælling — {restNavn(activeRestId)}</h1>
+          <div className="print-report-meta">Dato: {fmtDateShort(entry.dato)}{entry.hvem ? ` · Talt af: ${entry.hvem}` : ''} · Udskrevet {fmtDateTime(nowISO())}</div>
+          {entry.note && <div className="print-report-meta">Note: {entry.note}</div>}
+        </div>
+        <table>
+          <thead><tr><th>Vare</th><th>Kategori</th><th className="num">Talt antal</th></tr></thead>
+          <tbody>
+            {Object.entries(entry.counts || {}).map(([vid, c]) => {
+              const it = vareById(vid);
+              const stk = typeof c === 'object' ? c.stk : c;
+              const detalje = typeof c === 'object' && it ? fmtPakkeLoese(it, c.antalPakker, c.antalLoese) : null;
+              return <tr key={vid}><td>{it?.navn || '(slettet)'}</td><td className="item-cat">{it?.kategori || ''}</td><td className="num">{stk} {it?.enhed || ''}{detalje && it?.pakke_antal ? ` (${detalje})` : ''}</td></tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  function renderPrintPeriode(fra, til) {
+    const lev = restData.leverancer.filter(l => l.dato >= fra && l.dato <= til);
+    const spild = restData.spild.filter(sp => sp.dato >= fra && sp.dato <= til);
+    const opts = restData.optaellinger.filter(o => o.dato >= fra && o.dato <= til);
+    const posTal = restData.posTal.filter(p => p.dato >= fra && p.dato <= til);
+    const sumPrVare = (entries, field) => { const s = {}; entries.forEach(e => { s[e.vare_id] = (s[e.vare_id] || 0) + e[field]; }); return s; };
+    const levSum = sumPrVare(lev, 'antal_stk'), spildSum = sumPrVare(spild, 'antal_stk'), posSum = {};
+    posTal.forEach(p => { posSum[p.vare_id] = (posSum[p.vare_id] || 0) + p.antal; });
+    const alleIds = new Set([...Object.keys(levSum), ...Object.keys(spildSum), ...Object.keys(posSum)]);
+    return (
+      <div>
+        <div className="print-report-head">
+          <h1>Periode-rapport — {restNavn(activeRestId)}</h1>
+          <div className="print-report-meta">{fmtDateShort(fra)} – {fmtDateShort(til)} · Udskrevet {fmtDateTime(nowISO())}</div>
+        </div>
+        <div className="print-report-section-title">Leverancer &amp; spild</div>
+        {alleIds.size === 0 ? <div className="print-report-empty">Ingen data i denne periode.</div> : (
+          <table>
+            <thead><tr><th>Vare</th><th className="num">Leveret</th><th className="num">Spild</th><th className="num">POS-salg</th></tr></thead>
+            <tbody>
+              {Array.from(alleIds).map(vid => {
+                const it = vareById(vid);
+                return <tr key={vid}><td>{it?.navn || '(slettet)'}</td><td className="num">{levSum[vid] !== undefined ? `${levSum[vid]} ${it?.enhed || ''}` : '—'}</td><td className="num">{spildSum[vid] !== undefined ? `${spildSum[vid]} ${it?.enhed || ''}` : '—'}</td><td className="num">{posSum[vid] !== undefined ? `${posSum[vid]} ${it?.enhed || ''}` : '—'}</td></tr>;
+              })}
+            </tbody>
+          </table>
+        )}
+        <div className="print-report-section-title">Optællinger</div>
+        {opts.length === 0 ? <div className="print-report-empty">Ingen optællinger i denne periode.</div> : opts.map(o => (
+          <div key={o.id} style={{ marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>{fmtDateShort(o.dato)}{o.hvem ? ` — ${o.hvem}` : ''}</div>
+            <table><thead><tr><th>Vare</th><th className="num">Talt antal</th></tr></thead><tbody>
+              {Object.entries(o.counts || {}).map(([vid, c]) => {
+                const it = vareById(vid);
+                const stk = typeof c === 'object' ? c.stk : c;
+                return <tr key={vid}><td>{it?.navn || '(slettet)'}</td><td className="num">{stk} {it?.enhed || ''}</td></tr>;
+              })}
+            </tbody></table>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // ---- PakkeInput component ----
+  function PakkeInput({ vare, pakker, loese, onChangePakker, onChangeLoese }) {
+    if (!harPakke(vare)) return null;
+    const total = toStkCombo(vare, pakker, loese);
+    return (
+      <div className="field-row" style={{ marginBottom: 0 }}>
+        <div className="field"><label>Antal {vare.pakke_str}</label><input type="number" min="0" step="any" value={pakker} onChange={e => onChangePakker(e.target.value)} placeholder="0" /></div>
+        <div className="field"><label>Antal løse {vare.enhed}</label><input type="number" min="0" step="any" value={loese} onChange={e => onChangeLoese(e.target.value)} placeholder="0" /></div>
+        {(pakker || loese) && total !== null && <div className="conversion-hint" style={{ alignSelf: 'center', marginTop: 18 }}>= {total} {vare.enhed} i alt</div>}
+      </div>
+    );
+  }
+
+  if (loading) return <div className="spinner-wrap">Indlæser data…</div>;
+
+  // ---- Views ----
+  const forbrug = computeForbrug();
+  const optStatus = getOptaellingsStatus();
+  const PAAMINDELSESDAGE = 14;
+
+  function renderLager() {
+    const items = varerForRest.filter(it => !search || it.navn.toLowerCase().includes(search.toLowerCase()) || it.kategori.toLowerCase().includes(search.toLowerCase()));
+    return (
+      <div>
+        {varerForRest.length > 0 && (optStatus.aldrigTalt || optStatus.dage >= PAAMINDELSESDAGE) && (
+          <div className="banner reminder">
+            {optStatus.aldrigTalt ? '⚠ Der er ikke lavet nogen optælling på denne restaurant endnu.' : `⚠ Sidst talt for ${optStatus.dage} dage siden (${fmtDateShort(optStatus.dato)}). Overvej en ny optælling.`}
+          </div>
+        )}
+        <div className="toolbar no-print">
+          <input className="search-box" placeholder="Søg vare eller kategori…" value={search} onChange={e => setSearch(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn ghost" onClick={openAddItem}>+ Tilføj vare</button>
+            <button className="btn ghost" onClick={() => openAddDelivery(null)}>+ Levering</button>
+            <button className="btn ghost" onClick={() => openAddSpild(null)}>+ Spild</button>
+            <button className="btn ghost" onClick={openPosIndsaet}>+ Salgstal fra POS</button>
+            <button className="btn rust" onClick={openNewOptaelling}>Ny optælling</button>
+          </div>
+        </div>
+        {items.length === 0 ? (
+          <div className="empty-state"><div className="display">Ingen varer endnu</div><div>Tilføj din første vare for at komme i gang.</div></div>
+        ) : (
+          <table className="lager-table">
+            <thead><tr>
+              <th>Vare</th><th>Kategori</th><th className="num">Senest talt</th>
+              <th className="num">Status</th><th className="num">Solgt siden sidst</th>
+              <th className="num">Spild</th><th className="num">Pr. dag</th><th className="no-print"></th>
+            </tr></thead>
+            <tbody>
+              {items.map(it => {
+                const latest = getLatestCount(it.id);
+                const f = forbrug[it.id];
+                const status = vurderLagerstatus(latest, f);
+                return (
+                  <tr key={it.id}>
+                    <td><div className="item-name">{it.navn}</div><div className="item-cat">{it.enhed}{harPakke(it) ? ` · 1 ${it.pakke_str} = ${it.pakke_antal} ${it.enhed}` : ''}</div></td>
+                    <td className="item-cat">{it.kategori}</td>
+                    <td className="num">
+                      {latest ? (harPakke(it) && latest.antalPakker !== undefined ? (
+                        <><div>{fmtPakkeLoese(it, latest.antalPakker, latest.antalLoese)}</div><div className="item-cat">= {latest.stk} {it.enhed}</div></>
+                      ) : `${latest.stk} ${it.enhed}`) : <span className="item-cat">ikke talt</span>}
+                    </td>
+                    <td className="num">{status ? <span className={`tag ${status.niveau}`}>~{status.dageTilbage} dage</span> : <span className="item-cat">—</span>}</td>
+                    <td className="num">{f ? <span className={`delta ${f.solgt > 0 ? 'used' : 'zero'}`}>{f.solgt} {it.enhed}</span> : <span className="item-cat">—</span>}</td>
+                    <td className="num">{f && f.spild > 0 ? <span className="delta used">{f.spild} {it.enhed}</span> : <span className="item-cat">—</span>}</td>
+                    <td className="num">{f ? <span className="item-cat">{f.perDag}/dag</span> : <span className="item-cat">—</span>}</td>
+                    <td className="no-print">
+                      <div className="row-actions">
+                        <button className="icon-btn" title="Levering" onClick={() => openAddDelivery(it)}>+</button>
+                        <button className="icon-btn" title="Spild" onClick={() => openAddSpild(it)}>⚠</button>
+                        <button className="icon-btn" title="Redigér" onClick={() => openEditItem(it)}>✎</button>
+                        <button className="icon-btn" title="Fjern" onClick={() => handleDeleteItem(it)}>×</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    );
+  }
+
+  function renderHistorik() {
+    const combined = [
+      ...restData.optaellinger.map(o => ({ ...o, _type: 'optaelling' })),
+      ...restData.leverancer.map(l => ({ ...l, _type: 'levering' })),
+      ...restData.spild.map(sp => ({ ...sp, _type: 'spild' })),
+      ...restData.posTal.map(p => ({ ...p, _type: 'pos' })),
+    ].sort((a, b) => (b.dato + (b.oprettet || '')).localeCompare(a.dato + (a.oprettet || '')));
+    const typeLabel = t => t === 'optaelling' ? 'Optælling' : t === 'levering' ? 'Levering' : t === 'pos' ? 'POS-salg' : 'Spild';
+    return (
+      <div>
+        <div className="section-title">Historik</div>
+        <div className="periode-toolbar no-print">
+          <div className="field"><label>Udskriv periode fra</label><input type="date" value={periodeFra} onChange={e => setPeriodeFra(e.target.value)} /></div>
+          <div className="field"><label>til</label><input type="date" value={periodeTil} onChange={e => setPeriodeTil(e.target.value)} /></div>
+          <button className="btn ghost" onClick={() => printRapport({ type: 'periode', fra: periodeFra, til: periodeTil })}>🖨 Udskriv periode-rapport</button>
+        </div>
+        {combined.length === 0 ? (
+          <div className="empty-state"><div className="display">Ingen historik endnu</div></div>
+        ) : (
+          <div className="history-list">
+            {combined.map(e => {
+              const vare = e._type !== 'optaelling' ? vareById(e.vare_id || e.vareId) : null;
+              return (
+                <div className="history-row" key={e._type + e.id} onClick={() => openHistoryDetail(e, typeLabel(e._type))}>
+                  <span className="history-date">{fmtDateShort(e.dato)}</span>
+                  <span className={`history-type ${e._type}`}>{typeLabel(e._type)}</span>
+                  <span style={{ flex: 1 }}>
+                    {e._type === 'optaelling'
+                      ? `${Object.keys(e.counts || {}).length} varer talt${e.note ? ' — ' + e.note : ''}`
+                      : e._type === 'pos'
+                      ? `${e.antal} ${vare?.enhed || ''} solgt (POS) — ${vare?.navn || '(slettet)'}`
+                      : `${fmtPakkeLoese(vare, e.antal_pakker, e.antal_loese)} ${vare?.navn || '(slettet)'}${e.note ? ' — ' + e.note : ''}`}
+                  </span>
+                  {e.hvem && <span className="history-who">{e.hvem}</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderSammenligning() {
+    const { perVare, maaneder } = computeMaanedsForbrug();
+    if (maaneder.length === 0) return <div className="empty-state"><div className="display">Ikke nok data endnu</div><div>Du skal have optællinger i mindst to måneder.</div></div>;
+    return (
+      <div>
+        <div className="section-title">Sammenligning måned-til-måned</div>
+        <div className="compare-table">
+          <table>
+            <thead><tr><th>Vare</th>{maaneder.map(m => <th key={m} className="month-col">{fmtMaaned(m)}</th>)}</tr></thead>
+            <tbody>
+              {varerForRest.map(it => {
+                const rad = perVare[it.id] || {};
+                const vaerdier = maaneder.map(m => rad[m]);
+                return (
+                  <tr key={it.id}>
+                    <td><div className="item-name">{it.navn}</div><div className="item-cat">{it.enhed}</div></td>
+                    {maaneder.map((m, i) => {
+                      const v = rad[m];
+                      if (v === undefined) return <td key={m} className="num month-col"><span className="item-cat">—</span></td>;
+                      const prevV = i > 0 ? vaerdier[i - 1] : undefined;
+                      const trendClass = prevV !== undefined && v !== prevV ? (v > prevV ? 'compare-cell-up' : 'compare-cell-down') : '';
+                      return <td key={m} className={`num month-col ${trendClass}`}>{v}</td>;
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderIndstillinger() {
+    return (
+      <div>
+        <div className="section-title">Restauranter</div>
+        <table>
+          <thead><tr><th>Navn</th><th className="num">Varer</th><th></th></tr></thead>
+          <tbody>
+            {restauranter.map(r => (
+              <tr key={r.id}>
+                <td className="item-name">{r.navn}</td>
+                <td className="num">{r.id === activeRestId ? varerForRest.length : '…'}</td>
+                <td><div className="row-actions">
+                  <button className="btn small ghost" onClick={() => openEditRest(r)}>Omdøb</button>
+                  <button className="btn small ghost" onClick={() => handleDeleteRest(r)}>Slet</button>
+                </div></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 16 }}>
+          <button className="btn rust" onClick={openAddRest}>+ Tilføj restaurant</button>
+        </div>
+        <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--line)' }}>
+          <div className="section-title">Brugere</div>
+          <div className="hint" style={{ marginTop: 0 }}>Tilføj og administrér brugere direkte i Supabase-dashboardet under Authentication → Users. Opret en ny bruger med en e-mail og adgangskode — de kan derefter logge ind her.</div>
+          <div style={{ marginTop: 10 }}><a href="https://supabase.com/dashboard" target="_blank" rel="noopener" className="btn ghost">Åbn Supabase Dashboard ↗</a></div>
+        </div>
+        <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--line)' }}>
+          <div className="section-title">Konto</div>
+          <div className="hint" style={{ marginTop: 0 }}>Logget ind som: {session.user.email}</div>
+          <button className="btn ghost" onClick={() => supabase.auth.signOut()}>Log ud</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Modal helpers for optaelling list ----
+  function renderOptaellingListe(m) {
+    const erUdfyldt = it => { const c = m.counts[it.id] || {}; return (c.pakker !== '' && c.pakker !== undefined) || (c.loese !== '' && c.loese !== undefined); };
+    const antalUdfyldt = varerForRest.filter(erUdfyldt).length;
+    const synlige = m.kunManglende ? varerForRest.filter(it => !erUdfyldt(it)) : varerForRest;
+    const kategorier = [];
+    synlige.forEach(it => { const k = it.kategori || 'Andet'; let g = kategorier.find(g => g.navn === k); if (!g) { g = { navn: k, varer: [] }; kategorier.push(g); } g.varer.push(it); });
+    return (
+      <>
+        <div className="opt-toolbar">
+          <button type="button" className={`opt-filter-toggle ${m.kunManglende ? 'active' : ''}`} onClick={() => setModal({ ...m, kunManglende: !m.kunManglende })}>
+            {m.kunManglende ? '✓ Viser kun manglende' : 'Vis kun manglende'}
+          </button>
+          <span className="opt-progress">{antalUdfyldt} / {varerForRest.length} talt</span>
+        </div>
+        {kategorier.length === 0 ? (
+          <div className="hint">Alle varer er talt. Fjern filtret for at se dem igen.</div>
+        ) : kategorier.map(gruppe => {
+          const lukket = !!m.lukkedeKategorier[gruppe.navn];
+          return (
+            <div className="kategori-group" key={gruppe.navn}>
+              <div className={`kategori-head ${lukket ? 'collapsed' : ''}`}
+                onClick={() => setModal({ ...m, lukkedeKategorier: { ...m.lukkedeKategorier, [gruppe.navn]: !lukket } })}>
+                <span className="chevron">▾</span><span>{gruppe.navn}</span>
+                <span className="kategori-count">{gruppe.varer.filter(erUdfyldt).length}/{gruppe.varer.length}</span>
+              </div>
+              {!lukket && gruppe.varer.map(it => {
+                const c = m.counts[it.id] || { pakker: '', loese: '' };
+                return (
+                  <div className={`count-row ${erUdfyldt(it) ? 'is-counted' : ''}`} key={it.id}>
+                    <div className="count-row-name"><div className="item-name">{it.navn}</div><div className="item-cat">{it.enhed}</div></div>
+                    {harPakke(it) ? (
+                      <div className="count-pakke-group">
+                        <input className="count-input-small" type="number" min="0" step="any" placeholder="0" value={c.pakker} onChange={e => setModal({ ...m, counts: { ...m.counts, [it.id]: { ...c, pakker: e.target.value } } })} />
+                        <span className="unit-label">{it.pakke_str}</span><span className="unit-label">+</span>
+                        <input className="count-input-small" type="number" min="0" step="any" placeholder="0" value={c.loese} onChange={e => setModal({ ...m, counts: { ...m.counts, [it.id]: { ...c, loese: e.target.value } } })} />
+                        <span className="unit-label">løse {it.enhed}</span>
+                      </div>
+                    ) : (
+                      <input className="count-input" type="number" min="0" step="any" placeholder="0" value={c.loese} onChange={e => setModal({ ...m, counts: { ...m.counts, [it.id]: { ...c, loese: e.target.value } } })} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
+  const currentModal = modal;
+
+  return (
+    <div>
+      <div className="app-shell">
+        <div className="topbar">
+          <div className="brand">
+            <div className="brand-mark">LAGER<span>/</span>SYSTEM</div>
+            <div className="brand-sub">Optælling, leverancer &amp; forbrug</div>
+          </div>
+          <div className="topbar-right no-print">
+            {saving && <span style={{ fontSize: 11, color: 'var(--ink-soft)' }}>Gemmer…</span>}
+            <div className="export-wrap">
+              <button className="btn small ghost" onClick={() => setEksportMenuAaben(!eksportMenuAaben)}>⬇ Eksportér</button>
+              {eksportMenuAaben && (
+                <div className="export-menu">
+                  <button onClick={() => { eksporterAlt(); setEksportMenuAaben(false); }}>Lageroversigt</button>
+                  <button onClick={() => { eksporterOptaellinger(); setEksportMenuAaben(false); }}>Alle optællinger</button>
+                  <button onClick={() => { eksporterLeverancer(); setEksportMenuAaben(false); }}>Alle leverancer</button>
+                  <button onClick={() => { eksporterSpild(); setEksportMenuAaben(false); }}>Alt spild</button>
+                  <button onClick={() => { eksporterPosTalCSV(); setEksportMenuAaben(false); }}>POS-salgstal</button>
+                </div>
+              )}
+            </div>
+            <button className="btn small ghost" onClick={doPrint}>🖨 Udskriv</button>
+          </div>
+        </div>
+
+        <div className="nav no-print">
+          {restauranter.map(r => (
+            <button key={r.id} className={`nav-btn ${activeRestId === r.id ? 'active' : ''}`} onClick={() => { setActiveRestId(r.id); setView('lager'); setSearch(''); }}>{r.navn}</button>
+          ))}
+          <button className="nav-add" onClick={openAddRest}>+ Restaurant</button>
+        </div>
+
+        <div className="view-tabs no-print">
+          <button className={`vt-btn ${view === 'lager' ? 'active' : ''}`} onClick={() => setView('lager')}>Lager</button>
+          <button className={`vt-btn ${view === 'historik' ? 'active' : ''}`} onClick={() => setView('historik')}>Historik</button>
+          <button className={`vt-btn ${view === 'sammenligning' ? 'active' : ''}`} onClick={() => setView('sammenligning')}>Sammenligning</button>
+          <button className={`vt-btn ${view === 'indstillinger' ? 'active' : ''}`} onClick={() => setView('indstillinger')}>Indstillinger</button>
+        </div>
+
+        <div className="panel">
+          {view === 'lager' && renderLager()}
+          {view === 'historik' && renderHistorik()}
+          {view === 'sammenligning' && renderSammenligning()}
+          {view === 'indstillinger' && renderIndstillinger()}
+        </div>
+
+        {currentModal && (
+          <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setModal(null); }}>
+            <div className={`modal ${currentModal.type === 'optaelling' || currentModal.type === 'pos-indsaet' ? 'wide' : ''}`}>
+
+              {currentModal.type === 'rest-add' && (<>
+                <div className="modal-head"><div className="modal-title">Tilføj restaurant</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body"><div className="field"><label>Navn</label><input value={currentModal.navn} onChange={e => setModal({ ...currentModal, navn: e.target.value })} placeholder="f.eks. Strandkroen" autoFocus /></div></div>
+                <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitAddRest} disabled={saving}>Tilføj</button></div>
+              </>)}
+
+              {currentModal.type === 'rest-edit' && (<>
+                <div className="modal-head"><div className="modal-title">Omdøb restaurant</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body"><div className="field"><label>Navn</label><input value={currentModal.navn} onChange={e => setModal({ ...currentModal, navn: e.target.value })} autoFocus /></div></div>
+                <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitEditRest} disabled={saving}>Gem</button></div>
+              </>)}
+
+              {currentModal.type === 'vare-add' && (<>
+                <div className="modal-head"><div className="modal-title">Tilføj vare</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body">
+                  <div className="field"><label>Varenavn</label><input value={currentModal.navn} onChange={e => setModal({ ...currentModal, navn: e.target.value })} placeholder="f.eks. Carlsberg fadøl" autoFocus /></div>
+                  <div className="field-row">
+                    <div className="field"><label>Kategori</label><input value={currentModal.kategori} onChange={e => setModal({ ...currentModal, kategori: e.target.value })} placeholder="f.eks. Øl" /></div>
+                    <div className="field"><label>Enhed</label><input value={currentModal.enhed} onChange={e => setModal({ ...currentModal, enhed: e.target.value })} placeholder="stk / flasker" /></div>
+                  </div>
+                  <div className="field"><label><input type="checkbox" checked={currentModal.brugPakke} onChange={e => setModal({ ...currentModal, brugPakke: e.target.checked })} style={{ width: 'auto', marginRight: 6 }} />Kommer i ramme/kasse</label></div>
+                  {currentModal.brugPakke && (
+                    <div className="field-row">
+                      <div className="field"><label>Hvad hedder pakken?</label><input value={currentModal.pakkeStr} onChange={e => setModal({ ...currentModal, pakkeStr: e.target.value })} placeholder="ramme / kasse" /></div>
+                      <div className="field"><label>Antal {currentModal.enhed} pr. pakke</label><input type="number" min="1" value={currentModal.pakkeAntal} onChange={e => setModal({ ...currentModal, pakkeAntal: e.target.value })} placeholder="f.eks. 24" /></div>
+                    </div>
+                  )}
+                </div>
+                <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitAddItem} disabled={saving}>Tilføj</button></div>
+              </>)}
+
+              {currentModal.type === 'vare-edit' && (<>
+                <div className="modal-head"><div className="modal-title">Redigér vare</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body">
+                  <div className="field"><label>Varenavn</label><input value={currentModal.item.navn} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, navn: e.target.value } })} /></div>
+                  <div className="field-row">
+                    <div className="field"><label>Kategori</label><input value={currentModal.item.kategori} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, kategori: e.target.value } })} /></div>
+                    <div className="field"><label>Enhed</label><input value={currentModal.item.enhed} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, enhed: e.target.value } })} /></div>
+                  </div>
+                  <div className="field"><label><input type="checkbox" checked={currentModal.brugPakke} onChange={e => setModal({ ...currentModal, brugPakke: e.target.checked })} style={{ width: 'auto', marginRight: 6 }} />Kommer i ramme/kasse</label></div>
+                  {currentModal.brugPakke && (
+                    <div className="field-row">
+                      <div className="field"><label>Hvad hedder pakken?</label><input value={currentModal.item.pakke_str || ''} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, pakke_str: e.target.value } })} placeholder="ramme / kasse" /></div>
+                      <div className="field"><label>Antal {currentModal.item.enhed} pr. pakke</label><input type="number" min="1" value={currentModal.item.pakke_antal || ''} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, pakke_antal: e.target.value } })} /></div>
+                    </div>
+                  )}
+                </div>
+                <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitEditItem} disabled={saving}>Gem</button></div>
+              </>)}
+
+              {currentModal.type === 'levering' && (<>
+                <div className="modal-head"><div className="modal-title">Registrér levering</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body">
+                  <div className="field"><label>Vare</label>
+                    <select value={currentModal.vareId} onChange={e => setModal({ ...currentModal, vareId: e.target.value, antalPakker: '', antalLoese: '' })}>
+                      {varerForRest.map(it => <option key={it.id} value={it.id}>{it.navn}</option>)}
+                    </select>
+                  </div>
+                  {harPakke(vareById(currentModal.vareId)) ? (
+                    <PakkeInput vare={vareById(currentModal.vareId)} pakker={currentModal.antalPakker} loese={currentModal.antalLoese}
+                      onChangePakker={v => setModal({ ...currentModal, antalPakker: v })}
+                      onChangeLoese={v => setModal({ ...currentModal, antalLoese: v })} />
+                  ) : (
+                    <div className="field"><label>Antal ({vareById(currentModal.vareId)?.enhed || 'stk'})</label><input type="number" min="0" step="any" value={currentModal.antalLoese} onChange={e => setModal({ ...currentModal, antalLoese: e.target.value })} autoFocus /></div>
+                  )}
+                  <div className="field"><label>Dato</label><input type="date" value={currentModal.dato} onChange={e => setModal({ ...currentModal, dato: e.target.value })} /></div>
+                  <div className="field"><label>Hvem (valgfri)</label><input value={currentModal.hvem} onChange={e => setModal({ ...currentModal, hvem: e.target.value })} placeholder="dit navn" /></div>
+                  <div className="field"><label>Note (valgfri)</label><input value={currentModal.note} onChange={e => setModal({ ...currentModal, note: e.target.value })} placeholder="f.eks. leverandørnavn" /></div>
+                </div>
+                <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitLevering} disabled={saving}>Registrér</button></div>
+              </>)}
+
+              {currentModal.type === 'spild' && (<>
+                <div className="modal-head"><div className="modal-title">Registrér spild</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body">
+                  <div className="field"><label>Vare</label>
+                    <select value={currentModal.vareId} onChange={e => setModal({ ...currentModal, vareId: e.target.value, antalPakker: '', antalLoese: '' })}>
+                      {varerForRest.map(it => <option key={it.id} value={it.id}>{it.navn}</option>)}
+                    </select>
+                  </div>
+                  {harPakke(vareById(currentModal.vareId)) ? (
+                    <PakkeInput vare={vareById(currentModal.vareId)} pakker={currentModal.antalPakker} loese={currentModal.antalLoese}
+                      onChangePakker={v => setModal({ ...currentModal, antalPakker: v })}
+                      onChangeLoese={v => setModal({ ...currentModal, antalLoese: v })} />
+                  ) : (
+                    <div className="field"><label>Antal ({vareById(currentModal.vareId)?.enhed || 'stk'})</label><input type="number" min="0" step="any" value={currentModal.antalLoese} onChange={e => setModal({ ...currentModal, antalLoese: e.target.value })} autoFocus /></div>
+                  )}
+                  <div className="field"><label>Dato</label><input type="date" value={currentModal.dato} onChange={e => setModal({ ...currentModal, dato: e.target.value })} /></div>
+                  <div className="field"><label>Hvem (valgfri)</label><input value={currentModal.hvem} onChange={e => setModal({ ...currentModal, hvem: e.target.value })} placeholder="dit navn" /></div>
+                  <div className="field"><label>Årsag (valgfri)</label><input value={currentModal.note} onChange={e => setModal({ ...currentModal, note: e.target.value })} placeholder="f.eks. gik i stykker" /></div>
+                </div>
+                <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitSpildEntry} disabled={saving}>Registrér</button></div>
+              </>)}
+
+              {currentModal.type === 'optaelling' && (<>
+                <div className="modal-head"><div className="modal-title">{currentModal.redigerId ? 'Redigér optælling' : 'Ny optælling'}</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body">
+                  <div className="field-row">
+                    <div className="field"><label>Dato</label><input type="date" value={currentModal.dato} onChange={e => setModal({ ...currentModal, dato: e.target.value })} /></div>
+                    <div className="field"><label>Hvem (valgfri)</label><input value={currentModal.hvem} onChange={e => setModal({ ...currentModal, hvem: e.target.value })} placeholder="dit navn" /></div>
+                  </div>
+                  <div className="hint">Tæl kun <strong>lukkede, fulde</strong> rammer under "rammer" — anbrudte rammer og enkeltflasker tælles som "løse styk".</div>
+                  {varerForRest.length === 0 ? <div className="hint">Ingen varer at tælle endnu.</div> : renderOptaellingListe(currentModal)}
+                  <div className="field" style={{ marginTop: 14 }}><label>Note (valgfri)</label><input value={currentModal.note} onChange={e => setModal({ ...currentModal, note: e.target.value })} placeholder="f.eks. særlige bemærkninger" /></div>
+                </div>
+                <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitOptaelling} disabled={saving}>{currentModal.redigerId ? 'Gem ændringer' : 'Gem optælling'}</button></div>
+              </>)}
+
+              {currentModal.type === 'pos-indsaet' && currentModal.trin === 'indtast' && (<>
+                <div className="modal-head"><div className="modal-title">Indsæt salgstal fra POS</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body">
+                  <div className="hint">Kopiér en liste fra dit kassesystem og indsæt den herunder — én vare pr. linje. Systemet prøver at genkende hvilken vare hver linje hører til; du kan rette det bagefter.</div>
+                  <div className="field"><label>Dato</label><input type="date" value={currentModal.dato} onChange={e => setModal({ ...currentModal, dato: e.target.value })} /></div>
+                  <div className="field"><label>Indsæt tekst her</label><textarea rows="10" value={currentModal.raaTekst} onChange={e => setModal({ ...currentModal, raaTekst: e.target.value })} placeholder={'Coca-Cola 33cl\t45\nSprite 33cl\t12'} autoFocus /></div>
+                </div>
+                <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={tolkPosTekst}>Læs tekst</button></div>
+              </>)}
+
+              {currentModal.type === 'pos-indsaet' && currentModal.trin === 'bekraeft' && (<>
+                <div className="modal-head"><div className="modal-title">Bekræft varer</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body">
+                  <div className="hint">Tjek at hver linje er tilknyttet den rigtige vare.</div>
+                  <table>
+                    <thead><tr><th>Fra POS</th><th className="num">Antal</th><th>Tilknyttet vare</th></tr></thead>
+                    <tbody>
+                      {currentModal.matchede.map((m, i) => (
+                        <tr key={i}>
+                          <td className="item-cat">{m.raaNavn}</td>
+                          <td className="num">{m.antal}</td>
+                          <td>
+                            <select value={m.vareId || ''} onChange={e => { const ny = [...currentModal.matchede]; ny[i] = { ...m, vareId: e.target.value || null }; setModal({ ...currentModal, matchede: ny }); }}>
+                              <option value="">— Spring over —</option>
+                              {varerForRest.map(v => <option key={v.id} value={v.id}>{v.navn}</option>)}
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="modal-foot">
+                  <button className="btn ghost" onClick={() => setModal({ ...currentModal, trin: 'indtast' })}>Tilbage</button>
+                  <button className="btn rust" onClick={submitPosTal} disabled={saving}>Gem {currentModal.matchede.filter(m => m.vareId).length} salgstal</button>
+                </div>
+              </>)}
+
+              {currentModal.type === 'historik-detalje' && (<>
+                <div className="modal-head"><div className="modal-title">{currentModal.typeLabel} — {fmtDateShort(currentModal.entry.dato)}</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
+                <div className="modal-body">
+                  {currentModal.entry._type === 'optaelling' ? (
+                    <>
+                      <table>
+                        <thead><tr><th>Vare</th><th className="num">Talt antal</th></tr></thead>
+                        <tbody>
+                          {Object.entries(currentModal.entry.counts || {}).map(([vid, c]) => {
+                            const it = vareById(vid);
+                            const stk = typeof c === 'object' ? c.stk : c;
+                            const detalje = typeof c === 'object' && it ? fmtPakkeLoese(it, c.antalPakker, c.antalLoese) : null;
+                            return <tr key={vid}><td>{it?.navn || '(slettet)'}</td><td className="num">{stk} {it?.enhed || ''}{detalje && it?.pakke_antal ? ` (${detalje})` : ''}</td></tr>;
+                          })}
+                        </tbody>
+                      </table>
+                      {currentModal.entry.hvem && <div className="field" style={{ marginTop: 14 }}><label>Talt af</label><div>{currentModal.entry.hvem}</div></div>}
+                      {currentModal.entry.note && <div className="field" style={{ marginTop: 14 }}><label>Note</label><div>{currentModal.entry.note}</div></div>}
+                      <div className="field" style={{ marginTop: 14 }}><label>Registreret</label><div className="item-cat">{fmtDateTime(currentModal.entry.oprettet)}</div></div>
+                      {currentModal.entry.redigeret && <div className="field"><label>Senest redigeret</label><div className="item-cat">{fmtDateTime(currentModal.entry.redigeret)}</div></div>}
+                    </>
+                  ) : currentModal.entry._type === 'pos' ? (
+                    <div>
+                      <div className="field"><label>Vare</label><div>{vareById(currentModal.entry.vare_id)?.navn || '(slettet)'}</div></div>
+                      <div className="field"><label>Antal solgt (POS)</label><div>{currentModal.entry.antal} {vareById(currentModal.entry.vare_id)?.enhed || ''}</div></div>
+                      <div className="field"><label>Tekst fra POS</label><div className="item-cat">{currentModal.entry.raa_navn}</div></div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="field"><label>Vare</label><div>{vareById(currentModal.entry.vare_id)?.navn || '(slettet)'}</div></div>
+                      <div className="field"><label>Antal</label><div>{fmtPakkeLoese(vareById(currentModal.entry.vare_id), currentModal.entry.antal_pakker, currentModal.entry.antal_loese)}{currentModal.entry.antal_pakker > 0 ? ` (= ${currentModal.entry.antal_stk} ${vareById(currentModal.entry.vare_id)?.enhed || ''})` : ''}</div></div>
+                      {currentModal.entry.hvem && <div className="field"><label>Hvem</label><div>{currentModal.entry.hvem}</div></div>}
+                      {currentModal.entry.note && <div className="field"><label>Note</label><div>{currentModal.entry.note}</div></div>}
+                    </div>
+                  )}
+                </div>
+                <div className="modal-foot">
+                  {currentModal.entry._type === 'optaelling' && (<>
+                    <button className="btn ghost" onClick={() => handleDeleteOptaelling(currentModal.entry)}>Slet</button>
+                    <button className="btn ghost" onClick={() => openEditOptaelling(currentModal.entry)}>✎ Redigér</button>
+                    <button className="btn ghost" onClick={() => { printRapport({ type: 'optaelling', entry: currentModal.entry }); setModal(null); }}>🖨 Udskriv</button>
+                  </>)}
+                  <button className="btn ghost" onClick={() => setModal(null)}>Luk</button>
+                </div>
+              </>)}
+
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="print-report">
+        {printView?.type === 'optaelling' && renderPrintOptaelling(printView.entry)}
+        {printView?.type === 'periode' && renderPrintPeriode(printView.fra, printView.til)}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('app')).render(<App />);
+</script>
+</body>
+</html>
