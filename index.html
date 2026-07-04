@@ -9,12 +9,7 @@
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
 
-<!-- Recharts dependencies -->
-<script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
-<script src="https://unpkg.com/d3-scale@4.0.2/dist/d3-scale.min.js"></script>
-<script src="https://unpkg.com/d3-shape@3.2.0/dist/d3-shape.min.js"></script>
-<!-- Recharts (graphs) -->
-<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+
 
 <!-- React + Babel -->
 <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
@@ -1168,26 +1163,12 @@ function MainApp({ session }) {
   }
 
   function renderAnalyse() {
-    // Safety check — if Recharts failed to load, show a friendly message
-    if (typeof Recharts === 'undefined') {
-      return (
-        <div>
-          <div className="section-title">Analyse</div>
-          <div className="banner">Grafbiblioteket kunne ikke indlæses — tjek din internetforbindelse og genindlæs siden (Ctrl+Shift+R).</div>
-        </div>
-      );
-    }
-    // Extract Recharts components from global
-    const { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } = Recharts;
-
     const FARVER = ['#C4501C','#3D7A4F','#B8842E','#1C6B8A','#8B4FB3','#B23B3B','#2E7D68','#C4881C','#4A6FA5','#7D4E3A'];
-
     const opts = getOptaellingerSorted();
     const forbrug = computeForbrug();
     const { perVare, maaneder } = computeMaanedsForbrug();
 
-    // ---- 7: Forbrug over tid (linjediagram) ----
-    // Build data points: for each consecutive pair of optaellinger, one point per vare
+    // ---- Build tidspunkter (forbrug over tid) ----
     const tidspunkter = [];
     varerForRest.forEach(it => {
       const relevantOpts = opts.filter(o => o.counts && o.counts[it.id] !== undefined);
@@ -1199,59 +1180,96 @@ function MainApp({ session }) {
         const lastVal = typeof last.counts[it.id] === 'object' ? last.counts[it.id].stk : last.counts[it.id];
         const solgt = prevVal + leveret - lastVal - spildT;
         const dage = Math.max(1, Math.round((new Date(last.dato) - new Date(prev.dato)) / 86400000));
-        tidspunkter.push({ dato: last.dato, vareId: it.id, vare: it.navn, solgt, perDag: +(solgt/dage).toFixed(2), dage });
+        tidspunkter.push({ dato: last.dato, vareId: it.id, navn: it.navn, solgt, perDag: +(solgt/dage).toFixed(2) });
       }
     });
-
-    // Group by dato for the line chart
     const datoer = [...new Set(tidspunkter.map(t => t.dato))].sort();
-    const linjeData = datoer.map(dato => {
-      const obj = { dato: fmtDateShort(dato) };
-      varerForRest.forEach(it => {
-        const punkt = tidspunkter.find(t => t.dato === dato && t.vareId === it.id);
-        if (punkt) obj[it.navn] = punkt.perDag;
-      });
-      return obj;
-    });
 
-    // ---- 8: Top/bund rangering ----
+    // ---- Rangering ----
     const rangeringData = varerForRest
       .map(it => ({ navn: it.navn, enhed: it.enhed, ...forbrug[it.id] }))
       .filter(it => it.solgt !== undefined && it.solgt !== null)
       .sort((a, b) => b.solgt - a.solgt);
+    const maxSolgt = rangeringData.length ? Math.max(...rangeringData.map(d => d.solgt)) : 1;
 
-    // ---- 9: Sammenlign restauranter ----
-    // For each vare that exists in multiple restaurants, compare consumption
-    const alleRestData = {}; // restId -> { forbrug data }
-    // We only have data for activeRest here — note for user
-    const sammenligningNote = restauranter.length <= 1;
-
-    // ---- 10: Sæsonudsving — heatmap-style tabel ----
-    const saesonData = varerForRest.map(it => ({
-      navn: it.navn,
-      maaneder: maaneder.map(m => ({ maaned: fmtMaaned(m), solgt: perVare[it.id]?.[m] || 0 }))
-    })).filter(it => it.maaneder.some(m => m.solgt > 0));
-
-    // Color scale for heatmap
-    function heatmapFarve(solgt, max) {
-      if (!max || solgt === 0) return 'var(--paper-dim)';
+    // ---- Sæsonudsving ----
+    function heatFarve(solgt, max) {
+      if (!max || solgt === 0) return '#F0EFE9';
       const pct = solgt / max;
       if (pct > 0.75) return '#C4501C';
       if (pct > 0.5) return '#E8742A';
       if (pct > 0.25) return '#F5A55A';
       return '#FAD4B8';
     }
+    const saesonData = varerForRest
+      .map(it => ({ navn: it.navn, enhed: it.enhed, maaneder: maaneder.map(m => ({ m: fmtMaaned(m), solgt: perVare[it.id]?.[m] || 0 })) }))
+      .filter(it => it.maaneder.some(m => m.solgt > 0));
 
     const harNokData = opts.length >= 2;
+
+    // ---- Simple SVG line chart ----
+    function SvgLinjeChart({ data, varer }) {
+      if (!data.length || !varer.length) return <div className="compare-empty-note">Ikke nok datapunkter endnu.</div>;
+      const W = 700, H = 280, PAD = { top: 20, right: 20, bottom: 40, left: 50 };
+      const innerW = W - PAD.left - PAD.right;
+      const innerH = H - PAD.top - PAD.bottom;
+      // Collect all values
+      const alleVaerdier = [];
+      varer.forEach(it => data.forEach(d => { if (d[it.navn] !== undefined) alleVaerdier.push(d[it.navn]); }));
+      if (!alleVaerdier.length) return <div className="compare-empty-note">Ingen data at vise.</div>;
+      const maxY = Math.max(...alleVaerdier) * 1.1 || 1;
+      const xScale = i => PAD.left + (i / (data.length - 1)) * innerW;
+      const yScale = v => PAD.top + innerH - (v / maxY) * innerH;
+      // Y axis ticks
+      const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => ({ v: +(maxY * f).toFixed(1), y: yScale(maxY * f) }));
+      return (
+        <div style={{ overflowX: 'auto' }}>
+          <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: W, fontFamily: 'IBM Plex Mono', fontSize: 10 }}>
+            {/* Grid */}
+            {yTicks.map((t, i) => <line key={i} x1={PAD.left} x2={W - PAD.right} y1={t.y} y2={t.y} stroke="#DEDCD3" strokeDasharray="3 3" />)}
+            {/* Y axis labels */}
+            {yTicks.map((t, i) => <text key={i} x={PAD.left - 6} y={t.y + 3} textAnchor="end" fill="#5C5A54">{t.v}</text>)}
+            {/* X axis labels */}
+            {data.map((d, i) => <text key={i} x={xScale(i)} y={H - 8} textAnchor="middle" fill="#5C5A54" fontSize={9}>{d.dato}</text>)}
+            {/* Lines */}
+            {varer.map((it, vi) => {
+              const points = data.map((d, i) => d[it.navn] !== undefined ? [xScale(i), yScale(d[it.navn])] : null).filter(Boolean);
+              if (points.length < 2) return null;
+              const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ');
+              return (
+                <g key={it.id}>
+                  <path d={d} fill="none" stroke={FARVER[vi % FARVER.length]} strokeWidth={2} />
+                  {points.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={3} fill={FARVER[vi % FARVER.length]} />)}
+                </g>
+              );
+            })}
+          </svg>
+          {/* Legend */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', marginTop: 8 }}>
+            {varer.filter((it, vi) => data.some(d => d[it.navn] !== undefined)).map((it, vi) => (
+              <span key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
+                <span style={{ width: 12, height: 12, borderRadius: 2, background: FARVER[vi % FARVER.length], display: 'inline-block' }} />
+                {it.navn}
+              </span>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Build chart data
+    const linjeData = datoer.map(dato => {
+      const obj = { dato: fmtDateShort(dato) };
+      varerForRest.forEach(it => { const p = tidspunkter.find(t => t.dato === dato && t.vareId === it.id); if (p) obj[it.navn] = p.perDag; });
+      return obj;
+    });
 
     return (
       <div>
         <div className="section-title">Analyse</div>
 
         {!harNokData && (
-          <div className="banner">
-            Du skal have mindst to optællinger for at se forbrugsanalyse. Lav din første og anden optælling, så udfyldes graferne automatisk.
-          </div>
+          <div className="banner">Du skal have mindst to optællinger for at se forbrugsanalyse. Lav din første og anden optælling, så udfyldes graferne automatisk.</div>
         )}
 
         {harNokData && (
@@ -1259,82 +1277,59 @@ function MainApp({ session }) {
             {/* ---- 7: Forbrug over tid ---- */}
             <div style={{ marginBottom: 36 }}>
               <div className="print-report-section-title">Forbrug over tid (stk/dag)</div>
-              <div className="compare-empty-note" style={{ marginBottom: 10 }}>Viser gennemsnitligt dagligt forbrug (solgt ÷ dage) for hver periode mellem to optællinger.</div>
-              {linjeData.length < 2 ? (
-                <div className="compare-empty-note">Ikke nok datapunkter endnu — du skal have mindst 3 optællinger for en meningsfuld tidsgraf.</div>
-              ) : (
-                <ResponsiveContainer width="100%" height={320}>
-                  <LineChart data={linjeData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#DEDCD3" />
-                    <XAxis dataKey="dato" tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} />
-                    <YAxis tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} />
-                    <Tooltip contentStyle={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} />
-                    <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'IBM Plex Mono' }} />
-                    {varerForRest.map((it, i) => (
-                      linjeData.some(d => d[it.navn] !== undefined) && (
-                        <Line key={it.id} type="monotone" dataKey={it.navn} stroke={FARVER[i % FARVER.length]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls={false} />
-                      )
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
+              <div className="compare-empty-note" style={{ marginBottom: 10 }}>Gennemsnitligt dagligt forbrug per periode mellem to optællinger.</div>
+              <SvgLinjeChart data={linjeData} varer={varerForRest} />
             </div>
 
             {/* ---- 8: Rangering ---- */}
             <div style={{ marginBottom: 36 }}>
               <div className="print-report-section-title">Rangering — mest til mindst solgt</div>
-              <div className="compare-empty-note" style={{ marginBottom: 10 }}>Baseret på seneste periode mellem to optællinger.</div>
-              {rangeringData.length === 0 ? (
-                <div className="compare-empty-note">Ingen forbrugsdata endnu.</div>
-              ) : (
-                <ResponsiveContainer width="100%" height={Math.max(200, rangeringData.length * 36)}>
-                  <BarChart layout="vertical" data={rangeringData} margin={{ top: 0, right: 60, left: 10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#DEDCD3" horizontal={false} />
-                    <XAxis type="number" tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} />
-                    <YAxis type="category" dataKey="navn" tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} width={140} />
-                    <Tooltip
-                      contentStyle={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }}
-                      formatter={(value, name, props) => [`${value} ${props.payload.enhed} (${props.payload.perDag}/dag)`, 'Solgt']}
-                    />
-                    <Bar dataKey="solgt" radius={[0, 3, 3, 0]}>
-                      {rangeringData.map((entry, i) => <Cell key={i} fill={FARVER[i % FARVER.length]} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-
-            {/* ---- 9: Sammenlign restauranter ---- */}
-            <div style={{ marginBottom: 36 }}>
-              <div className="print-report-section-title">Sammenlign restauranter</div>
-              {sammenligningNote ? (
-                <div className="compare-empty-note">Du skal have mere end én restaurant for at sammenligne. Tilføj en restaurant under Indstillinger.</div>
-              ) : (
-                <div className="compare-empty-note">Sammenligning på tværs af restauranter kræver at data er indlæst for alle — skift til en anden restaurant-fane og tilbage for at opdatere. <em>(Fuld sammenligning på tværs af restauranter kommer i næste opdatering.)</em></div>
-              )}
-              {/* Show current restaurant data as reference */}
-              {rangeringData.length > 0 && (
-                <div style={{ marginTop: 10 }}>
-                  <div className="compare-empty-note" style={{ marginBottom: 8 }}>Nuværende restaurant — forbrug pr. dag:</div>
-                  <ResponsiveContainer width="100%" height={Math.max(200, rangeringData.length * 36)}>
-                    <BarChart layout="vertical" data={rangeringData.filter(d => d.perDag > 0)} margin={{ top: 0, right: 60, left: 10, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#DEDCD3" horizontal={false} />
-                      <XAxis type="number" tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} />
-                      <YAxis type="category" dataKey="navn" tick={{ fontSize: 11, fontFamily: 'IBM Plex Mono' }} width={140} />
-                      <Tooltip contentStyle={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} formatter={(v, n, p) => [`${v} ${p.payload.enhed}/dag`, 'Pr. dag']} />
-                      <Bar dataKey="perDag" fill="#3D7A4F" radius={[0, 3, 3, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+              <div className="compare-empty-note" style={{ marginBottom: 10 }}>Baseret på seneste periode. Hover/klik for detaljer.</div>
+              {rangeringData.length === 0 ? <div className="compare-empty-note">Ingen forbrugsdata endnu.</div> : (
+                <div style={{ overflowX: 'auto' }}>
+                  {rangeringData.map((it, i) => (
+                    <div key={it.navn} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                      <div style={{ width: 130, fontSize: 11, textAlign: 'right', color: 'var(--ink-soft)', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={it.navn}>{it.navn}</div>
+                      <div style={{ flex: 1, background: 'var(--paper-dim)', borderRadius: 3, height: 22, position: 'relative', minWidth: 100 }}>
+                        <div style={{ width: `${Math.max(2, (it.solgt / maxSolgt) * 100)}%`, background: FARVER[i % FARVER.length], height: '100%', borderRadius: 3, transition: 'width 0.3s' }} />
+                      </div>
+                      <div style={{ fontSize: 11, minWidth: 90, color: 'var(--ink)' }}><strong>{it.solgt}</strong> {it.enhed} <span style={{ color: 'var(--ink-soft)' }}>({it.perDag}/dag)</span></div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
 
-            {/* ---- 10: Sæsonudsving heatmap ---- */}
+            {/* ---- 9: Pr. dag per restaurant (denne restaurant) ---- */}
+            <div style={{ marginBottom: 36 }}>
+              <div className="print-report-section-title">Forbrug pr. dag — {restNavn(activeRestId)}</div>
+              <div className="compare-empty-note" style={{ marginBottom: 10 }}>
+                {restauranter.length <= 1 ? 'Tilføj flere restauranter under Indstillinger for at sammenligne dem mod hinanden.' : 'Fuld sammenligning på tværs af alle restauranter kommer i næste opdatering.'}
+              </div>
+              {rangeringData.filter(d => d.perDag > 0).length === 0 ? <div className="compare-empty-note">Ingen data.</div> : (
+                <div>
+                  {rangeringData.filter(d => d.perDag > 0).map((it, i) => {
+                    const maxPD = Math.max(...rangeringData.filter(d => d.perDag > 0).map(d => d.perDag));
+                    return (
+                      <div key={it.navn} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                        <div style={{ width: 130, fontSize: 11, textAlign: 'right', color: 'var(--ink-soft)', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.navn}</div>
+                        <div style={{ flex: 1, background: 'var(--paper-dim)', borderRadius: 3, height: 22, position: 'relative', minWidth: 100 }}>
+                          <div style={{ width: `${Math.max(2, (it.perDag / maxPD) * 100)}%`, background: '#3D7A4F', height: '100%', borderRadius: 3 }} />
+                        </div>
+                        <div style={{ fontSize: 11, minWidth: 80, color: 'var(--ink)' }}><strong>{it.perDag}</strong> {it.enhed}/dag</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ---- 10: Sæsonudsving ---- */}
             <div style={{ marginBottom: 36 }}>
               <div className="print-report-section-title">Sæsonudsving — solgt pr. måned</div>
-              <div className="compare-empty-note" style={{ marginBottom: 10 }}>Mørkere farve = højere forbrug den måned. Kræver optællinger spredt over flere måneder.</div>
+              <div className="compare-empty-note" style={{ marginBottom: 10 }}>Mørkere farve = højere forbrug den måned.</div>
               {maaneder.length < 2 ? (
-                <div className="compare-empty-note">Ikke nok data — du skal have optællinger i mindst to forskellige måneder.</div>
+                <div className="compare-empty-note">Kræver optællinger i mindst to måneder.</div>
               ) : saesonData.length === 0 ? (
                 <div className="compare-empty-note">Ingen forbrugsdata at vise.</div>
               ) : (
@@ -1355,7 +1350,7 @@ function MainApp({ session }) {
                           <tr key={it.navn}>
                             <td className="item-name">{it.navn}</td>
                             {it.maaneder.map((m, i) => (
-                              <td key={i} className="num" style={{ background: heatmapFarve(m.solgt, max), color: m.solgt / max > 0.5 ? 'white' : 'var(--ink)', fontWeight: m.solgt > 0 ? 600 : 400, padding: '8px 10px' }}>
+                              <td key={i} className="num" style={{ background: heatFarve(m.solgt, max), color: m.solgt / (max||1) > 0.5 ? 'white' : 'var(--ink)', fontWeight: m.solgt > 0 ? 600 : 400, padding: '8px 10px' }}>
                                 {m.solgt > 0 ? m.solgt : '—'}
                               </td>
                             ))}
