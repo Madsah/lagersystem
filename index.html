@@ -7,7 +7,7 @@
 <link rel="icon" href="data:,">
 
 <!-- Supabase -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.min.js"></script>
 
 <!-- React + Babel -->
 <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
@@ -345,7 +345,7 @@ const SUPABASE_KEY = 'sb_publishable_sVJt-ssGVzAEcA5NMd41qg_HMTWEtF0';
 // ================================================================
 
 const { useState, useEffect, useCallback, useRef } = React;
-const supabase = Supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ---- Helpers ----
 function todayStr() { return new Date().toISOString().slice(0, 10); }
@@ -452,11 +452,11 @@ async function dbLoadAll(restaurantId) {
     { data: varer }, { data: optaellinger }, { data: leverancer },
     { data: spild }, { data: posTal }
   ] = await Promise.all([
-    supabase.from('varer').select('*').eq('restaurant_id', restaurantId).order('navn'),
-    supabase.from('optaellinger').select('*').eq('restaurant_id', restaurantId).order('dato'),
-    supabase.from('leverancer').select('*').eq('restaurant_id', restaurantId).order('dato', { ascending: false }),
-    supabase.from('spild').select('*').eq('restaurant_id', restaurantId).order('dato', { ascending: false }),
-    supabase.from('pos_tal').select('*').eq('restaurant_id', restaurantId).order('dato', { ascending: false }),
+    db.from('varer').select('*').eq('restaurant_id', restaurantId).order('navn'),
+    db.from('optaellinger').select('*').eq('restaurant_id', restaurantId).order('dato'),
+    db.from('leverancer').select('*').eq('restaurant_id', restaurantId).order('dato', { ascending: false }),
+    db.from('spild').select('*').eq('restaurant_id', restaurantId).order('dato', { ascending: false }),
+    db.from('pos_tal').select('*').eq('restaurant_id', restaurantId).order('dato', { ascending: false }),
   ]);
   return { varer: varer || [], optaellinger: optaellinger || [], leverancer: leverancer || [], spild: spild || [], posTal: posTal || [] };
 }
@@ -469,8 +469,8 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false); });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
+    db.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false); });
+    const { data: { subscription } } = db.auth.onAuthStateChange((_event, session) => setSession(session));
     return () => subscription.unsubscribe();
   }, []);
 
@@ -491,7 +491,7 @@ function LoginScreen() {
   async function handleLogin(e) {
     e.preventDefault();
     setLoading(true); setError('');
-    const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
+    const { error } = await db.auth.signInWithPassword({ email, password: pw });
     if (error) setError('Forkert e-mail eller adgangskode.');
     setLoading(false);
   }
@@ -532,7 +532,7 @@ function MainApp({ session }) {
   // Load restaurants on mount
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from('restauranter').select('*').order('navn');
+      const { data } = await db.from('restauranter').select('*').order('navn');
       setRestauranter(data || []);
       if (data && data.length > 0) setActiveRestId(data[0].id);
       else setLoading(false);
@@ -646,19 +646,19 @@ function MainApp({ session }) {
 
   async function addRestaurant(navn) {
     setSaving(true);
-    const { data } = await supabase.from('restauranter').insert({ navn }).select().single();
+    const { data } = await db.from('restauranter').insert({ navn }).select().single();
     if (data) { setRestauranter(prev => [...prev, data]); setActiveRestId(data.id); }
     setSaving(false);
   }
   async function updateRestaurant(id, navn) {
     setSaving(true);
-    await supabase.from('restauranter').update({ navn }).eq('id', id);
+    await db.from('restauranter').update({ navn }).eq('id', id);
     setRestauranter(prev => prev.map(r => r.id === id ? { ...r, navn } : r));
     setSaving(false);
   }
   async function deleteRestaurant(id) {
     setSaving(true);
-    await supabase.from('restauranter').delete().eq('id', id);
+    await db.from('restauranter').delete().eq('id', id);
     const remaining = restauranter.filter(r => r.id !== id);
     setRestauranter(remaining);
     if (activeRestId === id) setActiveRestId(remaining[0]?.id || null);
@@ -667,56 +667,56 @@ function MainApp({ session }) {
 
   async function addVare(vare) {
     setSaving(true);
-    await supabase.from('varer').insert({ ...vare, restaurant_id: activeRestId });
+    await db.from('varer').insert({ ...vare, restaurant_id: activeRestId });
     await reloadData();
     setSaving(false);
   }
   async function updateVare(id, updates) {
     setSaving(true);
-    await supabase.from('varer').update(updates).eq('id', id);
+    await db.from('varer').update(updates).eq('id', id);
     await reloadData();
     setSaving(false);
   }
   async function deleteVare(id) {
     setSaving(true);
-    await supabase.from('varer').delete().eq('id', id);
+    await db.from('varer').delete().eq('id', id);
     await reloadData();
     setSaving(false);
   }
 
   async function addLevering(entry) {
     setSaving(true);
-    await supabase.from('leverancer').insert({ ...entry, restaurant_id: activeRestId });
+    await db.from('leverancer').insert({ ...entry, restaurant_id: activeRestId });
     await reloadData();
     setSaving(false);
   }
   async function addSpild(entry) {
     setSaving(true);
-    await supabase.from('spild').insert({ ...entry, restaurant_id: activeRestId });
+    await db.from('spild').insert({ ...entry, restaurant_id: activeRestId });
     await reloadData();
     setSaving(false);
   }
   async function addOptaelling(entry) {
     setSaving(true);
-    await supabase.from('optaellinger').insert({ ...entry, restaurant_id: activeRestId });
+    await db.from('optaellinger').insert({ ...entry, restaurant_id: activeRestId });
     await reloadData();
     setSaving(false);
   }
   async function updateOptaelling(id, updates) {
     setSaving(true);
-    await supabase.from('optaellinger').update({ ...updates, redigeret: nowISO() }).eq('id', id);
+    await db.from('optaellinger').update({ ...updates, redigeret: nowISO() }).eq('id', id);
     await reloadData();
     setSaving(false);
   }
   async function deleteOptaelling(id) {
     setSaving(true);
-    await supabase.from('optaellinger').delete().eq('id', id);
+    await db.from('optaellinger').delete().eq('id', id);
     await reloadData();
     setSaving(false);
   }
   async function addPosTal(entries) {
     setSaving(true);
-    await supabase.from('pos_tal').insert(entries.map(e => ({ ...e, restaurant_id: activeRestId })));
+    await db.from('pos_tal').insert(entries.map(e => ({ ...e, restaurant_id: activeRestId })));
     await reloadData();
     setSaving(false);
   }
@@ -1132,7 +1132,7 @@ function MainApp({ session }) {
         <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--line)' }}>
           <div className="section-title">Konto</div>
           <div className="hint" style={{ marginTop: 0 }}>Logget ind som: {session.user.email}</div>
-          <button className="btn ghost" onClick={() => supabase.auth.signOut()}>Log ud</button>
+          <button className="btn ghost" onClick={() => db.auth.signOut()}>Log ud</button>
         </div>
       </div>
     );
