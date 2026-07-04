@@ -9,8 +9,12 @@
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
 
+<!-- Recharts dependencies -->
+<script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+<script src="https://unpkg.com/d3-scale@4.0.2/dist/d3-scale.min.js"></script>
+<script src="https://unpkg.com/d3-shape@3.2.0/dist/d3-shape.min.js"></script>
 <!-- Recharts (graphs) -->
-<script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js"></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 
 <!-- React + Babel -->
 <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
@@ -1164,6 +1168,15 @@ function MainApp({ session }) {
   }
 
   function renderAnalyse() {
+    // Safety check — if Recharts failed to load, show a friendly message
+    if (typeof Recharts === 'undefined') {
+      return (
+        <div>
+          <div className="section-title">Analyse</div>
+          <div className="banner">Grafbiblioteket kunne ikke indlæses — tjek din internetforbindelse og genindlæs siden (Ctrl+Shift+R).</div>
+        </div>
+      );
+    }
     // Extract Recharts components from global
     const { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } = Recharts;
 
