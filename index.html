@@ -567,24 +567,24 @@ function BarcodeScanner({ onResult, onClose }) {
     let codeReader = null;
     async function start() {
       try {
-        // Check if ZXing loaded
         if (typeof ZXing === 'undefined') {
           setFejl('Stregkode-biblioteket kunne ikke indlæses. Tjek din internetforbindelse.');
           return;
         }
         codeReader = new ZXing.BrowserMultiFormatReader();
         readerRef.current = codeReader;
-        const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
-        if (!devices.length) { setFejl('Ingen kamera fundet på denne enhed.'); return; }
-        // Prefer back camera on mobile
-        const bagKamera = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('bag') || d.label.toLowerCase().includes('environment')) || devices[devices.length - 1];
         setStatus('Hold stregkoden foran kameraet…');
-        await codeReader.decodeFromVideoDevice(bagKamera.deviceId, videoRef.current, (result, err) => {
-          if (result) {
-            setStatus('Stregkode fundet! Slår op…');
-            onResult(result.getText());
+        // Don't list devices — just start with environment-facing camera directly
+        await codeReader.decodeFromConstraints(
+          { video: { facingMode: 'environment' } },
+          videoRef.current,
+          (result, err) => {
+            if (result) {
+              setStatus('Stregkode fundet! Slår op…');
+              onResult(result.getText());
+            }
           }
-        });
+        );
       } catch (e) {
         setFejl(`Kunne ikke starte kamera: ${e.message}`);
       }
