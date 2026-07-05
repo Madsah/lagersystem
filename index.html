@@ -9,7 +9,8 @@
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
 
-
+<!-- ZXing barcode scanner -->
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 
 <!-- React + Babel -->
 <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
@@ -404,7 +405,24 @@
     .lager-table thead th:nth-child(7), .lager-table tbody td:nth-child(7) { display: none; }
   }
 
-  ::placeholder { color: #B5B2A8; }
+  /* Barcode scanner */
+  .scanner-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 100;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;
+  }
+  .scanner-video-wrap {
+    position: relative; width: 100%; max-width: 360px; border-radius: 8px; overflow: hidden;
+    border: 2px solid var(--rust);
+  }
+  .scanner-video { width: 100%; display: block; }
+  .scanner-line {
+    position: absolute; left: 0; right: 0; height: 2px; background: var(--rust);
+    animation: scanline 2s ease-in-out infinite;
+  }
+  @keyframes scanline { 0%, 100% { top: 20%; } 50% { top: 80%; } }
+  .scanner-hint { color: white; font-size: 13px; margin-top: 16px; text-align: center; opacity: 0.8; }
+  .scanner-result { color: var(--good); font-size: 14px; margin-top: 12px; font-weight: 700; text-align: center; }
+  .scanner-error { color: var(--crit); font-size: 13px; margin-top: 12px; text-align: center; }
 </style>
 </head>
 <body>
@@ -534,6 +552,58 @@ async function dbLoadAll(restaurantId) {
     db.from('pos_tal').select('*').eq('restaurant_id', restaurantId).order('dato', { ascending: false }),
   ]);
   return { varer: varer || [], optaellinger: optaellinger || [], leverancer: leverancer || [], spild: spild || [], posTal: posTal || [] };
+}
+
+// ================================================================
+// BARCODE SCANNER COMPONENT
+// ================================================================
+function BarcodeScanner({ onResult, onClose }) {
+  const videoRef = React.useRef(null);
+  const [status, setStatus] = React.useState('starter…');
+  const [fejl, setFejl] = React.useState('');
+  const readerRef = React.useRef(null);
+
+  React.useEffect(() => {
+    let codeReader = null;
+    async function start() {
+      try {
+        // Check if ZXing loaded
+        if (typeof ZXing === 'undefined') {
+          setFejl('Stregkode-biblioteket kunne ikke indlæses. Tjek din internetforbindelse.');
+          return;
+        }
+        codeReader = new ZXing.BrowserMultiFormatReader();
+        readerRef.current = codeReader;
+        const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+        if (!devices.length) { setFejl('Ingen kamera fundet på denne enhed.'); return; }
+        // Prefer back camera on mobile
+        const bagKamera = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('bag') || d.label.toLowerCase().includes('environment')) || devices[devices.length - 1];
+        setStatus('Hold stregkoden foran kameraet…');
+        await codeReader.decodeFromVideoDevice(bagKamera.deviceId, videoRef.current, (result, err) => {
+          if (result) {
+            setStatus('Stregkode fundet! Slår op…');
+            onResult(result.getText());
+          }
+        });
+      } catch (e) {
+        setFejl(`Kunne ikke starte kamera: ${e.message}`);
+      }
+    }
+    start();
+    return () => { if (readerRef.current) { try { readerRef.current.reset(); } catch(e) {} } };
+  }, []);
+
+  return (
+    <div className="scanner-overlay">
+      <div className="scanner-video-wrap">
+        <video ref={videoRef} className="scanner-video" autoPlay playsInline muted />
+        <div className="scanner-line" />
+      </div>
+      {!fejl && <div className="scanner-hint">{status}</div>}
+      {fejl && <div className="scanner-error">{fejl}</div>}
+      <button className="btn ghost" style={{ marginTop: 20, color: 'white', borderColor: 'rgba(255,255,255,0.3)' }} onClick={onClose}>Annullér</button>
+    </div>
+  );
 }
 
 // ================================================================
@@ -866,6 +936,7 @@ function MainApp({ session }) {
   const [periodeTil, setPeriodeTil] = useState(todayStr());
   const [eksportMenuAaben, setEksportMenuAaben] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [scannerAaben, setScannerAaben] = useState(false);
 
   // Load restaurants and user role on mount
   useEffect(() => {
@@ -1012,6 +1083,55 @@ function MainApp({ session }) {
   }
 
   // ---- Supabase mutations ----
+  async function opslaaStregkode(kode) {
+    setScannerAaben(false);
+    setModal(prev => ({ ...prev, scanning: true, scanFejl: '', scanOk: '' }));
+    try {
+      const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${kode}.json`);
+      const data = await res.json();
+      if (data.status === 1 && data.product) {
+        const p = data.product;
+        const navn = p.product_name_da || p.product_name || p.abbreviated_product_name || '';
+        const brands = p.brands || '';
+        const kategori = p.categories_tags?.[0]?.replace('en:', '').replace(/-/g, ' ') || '';
+        const fulgtNavn = brands && !navn.toLowerCase().includes(brands.toLowerCase()) ? `${brands} ${navn}`.trim() : navn;
+
+        // Volumen — Open Food Facts gemmer det i quantity feltet, f.eks. "330 ml" eller "75 cl"
+        let volumenMl = '';
+        const qty = p.quantity || '';
+        const mlMatch = qty.match(/([\d.,]+)\s*ml/i);
+        const clMatch = qty.match(/([\d.,]+)\s*cl/i);
+        const lMatch = qty.match(/([\d.,]+)\s*l\b/i);
+        if (mlMatch) volumenMl = String(parseFloat(mlMatch[1].replace(',', '.')));
+        else if (clMatch) volumenMl = String(parseFloat(clMatch[1].replace(',', '.')) * 10);
+        else if (lMatch) volumenMl = String(parseFloat(lMatch[1].replace(',', '.')) * 1000);
+
+        setModal(prev => ({
+          ...prev,
+          navn: fulgtNavn || prev.navn,
+          kategori: kategoriFraOpenFood(kategori) || prev.kategori,
+          volumenMl: volumenMl || prev.volumenMl || '',
+          scanning: false,
+          scanOk: `Fundet: ${fulgtNavn || navn}${volumenMl ? ` (${volumenMl}ml)` : ''}`,
+        }));
+        return;
+      }
+    } catch(e) {}
+    setModal(prev => ({ ...prev, scanning: false, scanFejl: `Produkt ikke fundet (kode: ${kode}). Udfyld navn manuelt.` }));
+  }
+
+  function kategoriFraOpenFood(kategori) {
+    const k = (kategori || '').toLowerCase();
+    if (k.includes('beer') || k.includes('øl') || k.includes('lager')) return 'Øl';
+    if (k.includes('wine') || k.includes('vin')) return 'Vin';
+    if (k.includes('spirit') || k.includes('liquor') || k.includes('whisky') || k.includes('vodka') || k.includes('rom')) return 'Spiritus';
+    if (k.includes('water') || k.includes('vand')) return 'Vand';
+    if (k.includes('soft') || k.includes('soda') || k.includes('juice') || k.includes('cola') || k.includes('sodavand')) return 'Sodavand';
+    if (k.includes('coffee') || k.includes('kaffe')) return 'Kaffe';
+    if (k.includes('tea') || k.includes('te')) return 'Te';
+    return '';
+  }
+
   async function reloadData() {
     const data = await dbLoadAll(activeRestId);
     setRestData({ ...data });
@@ -1098,7 +1218,7 @@ function MainApp({ session }) {
   function openAddRest() { setModal({ type: 'rest-add', navn: '' }); }
   function openEditRest(r) { setModal({ type: 'rest-edit', id: r.id, navn: r.navn }); }
 
-  function openAddItem() { setModal({ type: 'vare-add', navn: '', kategori: '', enhed: 'stk', brugPakke: false, pakkeStr: '', pakkeAntal: '', note: '', minimum: '' }); }
+  function openAddItem() { setModal({ type: 'vare-add', navn: '', kategori: '', enhed: 'stk', brugPakke: false, pakkeStr: '', pakkeAntal: '', note: '', minimum: '', volumenMl: '', indkoebspris: '' }); }
   function openEditItem(it) { setModal({ type: 'vare-edit', item: { ...it }, brugPakke: harPakke(it) }); }
   function openBulkAdd() { setModal({ type: 'vare-bulk', tekst: '', fejl: '' }); }
   function openKopierVarer(fraRestId) { setModal({ type: 'vare-kopier', fraRestId, tilRestId: activeRestId }); }
@@ -1150,14 +1270,23 @@ function MainApp({ session }) {
 
   async function submitAddItem() {
     if (!modal.navn.trim()) return;
-    await addVare({ navn: modal.navn.trim(), kategori: modal.kategori.trim() || 'Andet', enhed: modal.enhed || 'stk', pakke_str: modal.brugPakke ? (modal.pakkeStr.trim() || 'ramme') : '', pakke_antal: modal.brugPakke ? (parseFloat(modal.pakkeAntal) || null) : null, note: modal.note || '', minimum: modal.minimum !== '' ? parseFloat(modal.minimum) || null : null });
+    await addVare({
+      navn: modal.navn.trim(), kategori: modal.kategori.trim() || 'Andet', enhed: modal.enhed || 'stk',
+      pakke_str: modal.brugPakke ? (modal.pakkeStr.trim() || 'ramme') : '',
+      pakke_antal: modal.brugPakke ? (parseFloat(modal.pakkeAntal) || null) : null,
+      note: modal.note || '', minimum: modal.minimum !== '' ? parseFloat(modal.minimum) || null : null,
+      volumen_ml: modal.volumenMl !== '' ? parseFloat(modal.volumenMl) || null : null,
+      indkoebspris: modal.indkoebspris !== '' ? parseFloat(modal.indkoebspris) || null : null,
+    });
     setModal(null);
   }
   async function submitEditItem() {
     const it = { ...modal.item };
     if (!modal.brugPakke) { it.pakke_str = ''; it.pakke_antal = null; } else { it.pakke_antal = parseFloat(it.pakke_antal) || null; }
     it.minimum = it.minimum !== '' && it.minimum !== null && it.minimum !== undefined ? parseFloat(it.minimum) || null : null;
-    await updateVare(it.id, { navn: it.navn, kategori: it.kategori, enhed: it.enhed, pakke_str: it.pakke_str, pakke_antal: it.pakke_antal, note: it.note || '', minimum: it.minimum });
+    it.volumen_ml = it.volumen_ml !== '' && it.volumen_ml !== null && it.volumen_ml !== undefined ? parseFloat(it.volumen_ml) || null : null;
+    it.indkoebspris = it.indkoebspris !== '' && it.indkoebspris !== null && it.indkoebspris !== undefined ? parseFloat(it.indkoebspris) || null : null;
+    await updateVare(it.id, { navn: it.navn, kategori: it.kategori, enhed: it.enhed, pakke_str: it.pakke_str, pakke_antal: it.pakke_antal, note: it.note || '', minimum: it.minimum, volumen_ml: it.volumen_ml, indkoebspris: it.indkoebspris });
     setModal(null);
   }
   async function handleDeleteItem(it) {
@@ -1595,7 +1724,12 @@ function MainApp({ session }) {
                   <tr key={it.id}>
                     <td>
                       <div className="item-name">{it.navn}</div>
-                      <div className="item-cat">{it.enhed}{harPakke(it) ? ` · 1 ${it.pakke_str} = ${it.pakke_antal} ${it.enhed}` : ''}</div>
+                      <div className="item-cat">
+                        {it.enhed}
+                        {harPakke(it) ? ` · 1 ${it.pakke_str} = ${it.pakke_antal} ${it.enhed}` : ''}
+                        {it.volumen_ml ? ` · ${it.volumen_ml >= 1000 ? (it.volumen_ml/1000).toFixed(1) + 'L' : it.volumen_ml + 'ml'}` : ''}
+                        {it.indkoebspris ? ` · ${it.indkoebspris.toFixed(2)} kr` : ''}
+                      </div>
                       {it.note && <div className="item-cat" style={{ fontStyle: 'italic' }}>{it.note}</div>}
                     </td>
                     <td className="item-cat">{it.kategori}</td>
@@ -2104,6 +2238,12 @@ function MainApp({ session }) {
               {currentModal.type === 'vare-add' && (<>
                 <div className="modal-head"><div className="modal-title">Tilføj vare</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
                 <div className="modal-body">
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
+                    <button className="btn ghost" style={{ fontSize: 13 }} onClick={() => setScannerAaben(true)}>📷 Scan stregkode</button>
+                    {currentModal.scanning && <span className="item-cat">Slår op…</span>}
+                    {currentModal.scanOk && <span style={{ fontSize: 12, color: 'var(--good)' }}>✓ {currentModal.scanOk}</span>}
+                    {currentModal.scanFejl && <span style={{ fontSize: 11, color: 'var(--crit)' }}>{currentModal.scanFejl}</span>}
+                  </div>
                   <div className="field"><label>Varenavn</label><input value={currentModal.navn} onChange={e => setModal({ ...currentModal, navn: e.target.value })} placeholder="f.eks. Carlsberg fadøl" autoFocus /></div>
                   <div className="field-row">
                     <div className="field"><label>Kategori</label><input value={currentModal.kategori} onChange={e => setModal({ ...currentModal, kategori: e.target.value })} placeholder="f.eks. Øl" /></div>
@@ -2111,6 +2251,10 @@ function MainApp({ session }) {
                   </div>
                   <div className="field-row">
                     <div className="field"><label>Minimum-beholdning (valgfri)</label><input type="number" min="0" value={currentModal.minimum} onChange={e => setModal({ ...currentModal, minimum: e.target.value })} placeholder="f.eks. 12" /></div>
+                  </div>
+                  <div className="field-row">
+                    <div className="field"><label>Volumen i ml (valgfri)</label><input type="number" min="0" value={currentModal.volumenMl} onChange={e => setModal({ ...currentModal, volumenMl: e.target.value })} placeholder="f.eks. 330 for 33cl" /></div>
+                    <div className="field"><label>Indkøbspris pr. stk i kr. (valgfri)</label><input type="number" min="0" step="0.01" value={currentModal.indkoebspris} onChange={e => setModal({ ...currentModal, indkoebspris: e.target.value })} placeholder="f.eks. 8.50" /></div>
                   </div>
                   <div className="field"><label>Note/kommentar (valgfri)</label><input value={currentModal.note} onChange={e => setModal({ ...currentModal, note: e.target.value })} placeholder="f.eks. bestil kun fra Carlsberg" /></div>
                   <div className="field"><label><input type="checkbox" checked={currentModal.brugPakke} onChange={e => setModal({ ...currentModal, brugPakke: e.target.checked })} style={{ width: 'auto', marginRight: 6 }} />Kommer i ramme/kasse</label></div>
@@ -2134,6 +2278,10 @@ function MainApp({ session }) {
                   </div>
                   <div className="field-row">
                     <div className="field"><label>Minimum-beholdning (valgfri)</label><input type="number" min="0" value={currentModal.item.minimum ?? ''} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, minimum: e.target.value } })} placeholder="f.eks. 12" /></div>
+                  </div>
+                  <div className="field-row">
+                    <div className="field"><label>Volumen i ml (valgfri)</label><input type="number" min="0" value={currentModal.item.volumen_ml ?? ''} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, volumen_ml: e.target.value } })} placeholder="f.eks. 330" /></div>
+                    <div className="field"><label>Indkøbspris pr. stk i kr. (valgfri)</label><input type="number" min="0" step="0.01" value={currentModal.item.indkoebspris ?? ''} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, indkoebspris: e.target.value } })} placeholder="f.eks. 8.50" /></div>
                   </div>
                   <div className="field"><label>Note/kommentar (valgfri)</label><input value={currentModal.item.note || ''} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, note: e.target.value } })} placeholder="f.eks. bestil kun fra Carlsberg" /></div>
                   <div className="field"><label><input type="checkbox" checked={currentModal.brugPakke} onChange={e => setModal({ ...currentModal, brugPakke: e.target.checked })} style={{ width: 'auto', marginRight: 6 }} />Kommer i ramme/kasse</label></div>
@@ -2318,6 +2466,8 @@ function MainApp({ session }) {
           </div>
         )}
       </div>
+
+      {scannerAaben && <BarcodeScanner onResult={opslaaStregkode} onClose={() => setScannerAaben(false)} />}
 
       <div className="print-report">
         {printView?.type === 'optaelling' && renderPrintOptaelling(printView.entry)}
