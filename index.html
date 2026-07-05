@@ -1295,31 +1295,28 @@ function MainApp({ session }) {
   }
 
   async function submitBulkAdd() {
-    // Format per linje: "Navn, Kategori, Enhed" — kategori og enhed er valgfrie
     const linjer = modal.tekst.split('\n').map(l => l.trim()).filter(Boolean);
     if (!linjer.length) return;
     const varer = linjer.map(l => {
       const dele = l.split(',').map(s => s.trim());
-      return { navn: dele[0] || '', kategori: dele[1] || 'Andet', enhed: dele[2] || 'stk', pakke_str: '', pakke_antal: null, note: '', minimum: null };
+      return { navn: dele[0] || '', kategori: dele[1] || 'Andet', enhed: dele[2] || 'stk', pakke_str: '', pakke_antal: null, note: '', minimum: null, volumen_ml: null, indkoebspris: null, restaurant_id: activeRestId };
     }).filter(v => v.navn);
     if (!varer.length) { setModal({ ...modal, fejl: 'Ingen gyldige varer fundet — tjek formatet.' }); return; }
     setSaving(true);
-    for (const v of varer) {
-      await supabase.from('varer').insert({ ...v, restaurant_id: activeRestId });
-    }
+    // Insert all at once instead of one by one
+    const { error } = await db.from('varer').insert(varer);
+    if (error) { setModal({ ...modal, fejl: `Fejl: ${error.message}` }); setSaving(false); return; }
     await reloadData();
     setSaving(false);
     setModal(null);
   }
 
   async function submitKopierVarer() {
-    const kildeVarer = (await supabase.from('varer').select('*').eq('restaurant_id', modal.fraRestId)).data || [];
+    const kildeVarer = (await db.from('varer').select('*').eq('restaurant_id', modal.fraRestId)).data || [];
     if (!kildeVarer.length) { alert('Ingen varer at kopiere fra den valgte restaurant.'); return; }
     setSaving(true);
-    for (const v of kildeVarer) {
-      const { id, restaurant_id, created_at, ...rest } = v;
-      await supabase.from('varer').insert({ ...rest, restaurant_id: activeRestId });
-    }
+    const nyeVarer = kildeVarer.map(({ id, restaurant_id, created_at, ...rest }) => ({ ...rest, restaurant_id: activeRestId }));
+    await db.from('varer').insert(nyeVarer);
     await reloadData();
     setSaving(false);
     setModal(null);
