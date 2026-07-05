@@ -198,17 +198,12 @@
   .panel { padding: 18px 24px 60px; }
 
   /* TYPOGRAPHY */
-  .eyebrow { font-size: 10.5px; letter-spacing: 0.08em; color: var(--ink-soft); text-transform: uppercase; margin-bottom: 4px; }
   .section-title {
     font-family: 'Oswald', sans-serif; text-transform: uppercase; font-size: 19px; font-weight: 600;
     margin: 0 0 14px; display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap;
   }
-  .section-title-left { display: flex; align-items: center; gap: 10px; }
   .item-name { font-weight: 600; }
   .item-cat { font-size: 11px; color: var(--ink-soft); }
-  .delta { font-weight: 700; }
-  .delta.used { color: var(--rust); }
-  .delta.zero { color: var(--ink-soft); }
 
   /* TAGS */
   .tag {
@@ -235,6 +230,7 @@
   .btn {
     font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; font-weight: 600; border: 1px solid var(--ink);
     background: var(--ink); color: var(--paper); padding: 8px 14px; cursor: pointer; border-radius: 3px;
+    transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease;
   }
   .btn:hover { opacity: 0.82; }
   .btn.ghost { background: transparent; color: var(--ink); }
@@ -245,6 +241,7 @@
   .icon-btn {
     width: 26px; height: 26px; border: 1px solid var(--line); background: var(--paper); border-radius: 3px;
     cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; color: var(--ink-soft);
+    transition: border-color 0.12s ease, color 0.12s ease;
   }
   .icon-btn:hover { border-color: var(--ink); color: var(--ink); }
 
@@ -421,7 +418,6 @@
   }
   @keyframes scanline { 0%, 100% { top: 20%; } 50% { top: 80%; } }
   .scanner-hint { color: white; font-size: 13px; margin-top: 16px; text-align: center; opacity: 0.8; }
-  .scanner-result { color: var(--good); font-size: 14px; margin-top: 12px; font-weight: 700; text-align: center; }
   .scanner-error { color: var(--crit); font-size: 13px; margin-top: 12px; text-align: center; }
 </style>
 </head>
@@ -433,7 +429,7 @@
 // CONFIGURATION — replace these two values with your Supabase credentials
 // Project Settings → API in the Supabase dashboard
 // ================================================================
-const SUPABASE_URL = 'https://cwoypysllnyncvoxuvkc.supabase.co';
+const SUPABASE_URL = 'https://cwoypysllnyncvoxuvkc.supabase.co/';
 const SUPABASE_KEY = 'sb_publishable_sVJt-ssGVzAEcA5NMd41qg_HMTWEtF0';
 // ================================================================
 
@@ -611,11 +607,9 @@ function BarcodeScanner({ onResult, onClose }) {
 // ================================================================
 function BrugerRollerManager({ restauranter, session }) {
   const [roller, setRoller] = useState([]);
-  const [alleUsers, setAlleUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [nySaving, setNySaving] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRolle, setInviteRolle] = useState('personale');
   const [inviteFejl, setInviteFejl] = useState('');
   const [inviteOk, setInviteOk] = useState('');
 
@@ -634,23 +628,24 @@ function BrugerRollerManager({ restauranter, session }) {
   async function inviterBruger() {
     if (!inviteEmail.trim()) return;
     setInviteFejl(''); setInviteOk(''); setNySaving(true);
-    // Send invite via Supabase Auth
-    const { data, error } = await db.auth.admin.inviteUserByEmail(inviteEmail.trim());
-    if (error) {
-      // admin.inviteUserByEmail requires service key — fallback to signUp
-      // Try using the standard invite which sends a magic link
-      const { error: e2 } = await db.auth.signUp({ email: inviteEmail.trim(), password: Math.random().toString(36).slice(2) + '!Aa1' });
-      if (e2) {
-        setInviteFejl(`Kunne ikke oprette bruger: ${e2.message}. Opret brugeren manuelt i Supabase Dashboard → Authentication → Users.`);
+    // The admin invite API isn't available with the public key, so we use signUp,
+    // which sends a confirmation email the user clicks to set their own password.
+    try {
+      const { error } = await db.auth.signUp({
+        email: inviteEmail.trim(),
+        password: Math.random().toString(36).slice(2) + '!Aa1',
+      });
+      if (error) {
+        setInviteFejl(`Kunne ikke oprette bruger: ${error.message}. Opret evt. manuelt i Supabase Dashboard → Authentication → Users.`);
         setNySaving(false);
         return;
       }
+      setInviteOk(`Bruger oprettet for ${inviteEmail.trim()}. De modtager en bekræftelses-mail. Tildel dem en rolle nedenfor.`);
+      setInviteEmail('');
+      await indlaes();
+    } catch (e) {
+      setInviteFejl(`Fejl: ${e.message}. Opret brugeren manuelt i Supabase Dashboard → Authentication → Users.`);
     }
-    // Find the new user's id
-    await new Promise(r => setTimeout(r, 1000));
-    setInviteOk(`Invitation sendt til ${inviteEmail.trim()}. Tildel dem en rolle nedenfor når de accepterer.`);
-    setInviteEmail('');
-    await indlaes();
     setNySaving(false);
   }
 
@@ -669,15 +664,6 @@ function BrugerRollerManager({ restauranter, session }) {
       );
     }
     await indlaes();
-    setNySaving(false);
-  }
-
-  async function tilfoejEksisterendeBruger(email) {
-    if (!email.trim()) return;
-    setNySaving(true); setInviteFejl(''); setInviteOk('');
-    // Look up user by querying bruger_roller won't work — we need to insert directly
-    // We'll insert with a placeholder and let admin fix via SQL if needed
-    setInviteFejl('For at tilføje en eksisterende bruger der ikke har en rolle endnu, kør dette i Supabase SQL Editor:\n\ninsert into bruger_roller (user_id, restaurant_id, rolle)\nselect id, null, \'personale\' from auth.users where email = \'' + email.trim() + '\';');
     setNySaving(false);
   }
 
@@ -1235,7 +1221,7 @@ function MainApp({ session }) {
   function openNewOptaelling() {
     const counts = {};
     varerForRest.forEach(it => { counts[it.id] = { pakker: '', loese: '' }; });
-    setModal({ type: 'optaelling', dato: todayStr(), counts, note: '', hvem: autoHvem, redigerId: null, kunManglende: false, lukkedeKategorier: {} });
+    setModal({ type: 'optaelling', dato: todayStr(), counts, note: '', hvem: autoHvem, redigerId: null, kunManglende: false, lukkedeKategorier: {}, placeringFilter: '' });
   }
   function openEditOptaelling(entry) {
     const counts = {};
@@ -1532,7 +1518,7 @@ function MainApp({ session }) {
             <tbody>
               {resultater.map(it => {
                 const latest = getLatestCount(it.id);
-                const f = computeForbrug()[it.id];
+                const f = forbrug[it.id];
                 const status = vurderLagerstatus(latest, f, it);
                 return (
                   <tr key={it.id} onClick={() => { setActiveRestId(it.restId); setView('lager'); setSearch(it.navn); setGlobalSoeg(''); }} style={{ cursor: 'pointer' }}>
@@ -2169,8 +2155,14 @@ function MainApp({ session }) {
   // ---- Modal helpers for optaelling list ----
   function renderOptaellingListe(m) {
     const erUdfyldt = it => { const c = m.counts[it.id] || {}; return (c.pakker !== '' && c.pakker !== undefined) || (c.loese !== '' && c.loese !== undefined); };
-    const antalUdfyldt = varerForRest.filter(erUdfyldt).length;
-    const synlige = m.kunManglende ? varerForRest.filter(it => !erUdfyldt(it)) : varerForRest;
+
+    // Filter by placering if set
+    const vaererIFilter = m.placeringFilter
+      ? varerForRest.filter(it => (it.placering || '') === m.placeringFilter)
+      : varerForRest;
+
+    const antalUdfyldt = vaererIFilter.filter(erUdfyldt).length;
+    const synlige = m.kunManglende ? vaererIFilter.filter(it => !erUdfyldt(it)) : vaererIFilter;
     const kategorier = [];
     synlige.forEach(it => { const k = it.kategori || 'Andet'; let g = kategorier.find(g => g.navn === k); if (!g) { g = { navn: k, varer: [] }; kategorier.push(g); } g.varer.push(it); });
 
@@ -2185,10 +2177,19 @@ function MainApp({ session }) {
     return (
       <>
         <div className="opt-toolbar">
+          {placeringer.length > 0 && (
+            <select
+              value={m.placeringFilter || ''}
+              onChange={e => setModal({ ...m, placeringFilter: e.target.value })}
+              style={{ fontFamily: 'IBM Plex Mono', fontSize: 12, padding: '5px 8px', border: '1px solid var(--line)', borderRadius: 3, background: m.placeringFilter ? 'var(--ink)' : 'var(--paper)', color: m.placeringFilter ? 'var(--paper)' : 'var(--ink)' }}>
+              <option value="">Alle placeringer</option>
+              {placeringer.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          )}
           <button type="button" className={`opt-filter-toggle ${m.kunManglende ? 'active' : ''}`} onClick={() => setModal({ ...m, kunManglende: !m.kunManglende })}>
             {m.kunManglende ? '✓ Viser kun manglende' : 'Vis kun manglende'}
           </button>
-          <span className="opt-progress">{antalUdfyldt} / {varerForRest.length} talt</span>
+          <span className="opt-progress">{antalUdfyldt} / {vaererIFilter.length} talt{m.placeringFilter ? ` i ${m.placeringFilter}` : ''}</span>
         </div>
         {kategorier.length === 0 ? (
           <div className="hint">Alle varer er talt. Fjern filtret for at se dem igen.</div>
