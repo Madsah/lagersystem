@@ -2238,24 +2238,20 @@ function MainApp({ session }) {
               {currentModal.type === 'vare-add' && (<>
                 <div className="modal-head"><div className="modal-title">Tilføj vare</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
                 <div className="modal-body">
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                    <button className="btn ghost" style={{ fontSize: 13 }} onClick={() => setScannerAaben(true)}>📷 Scan stregkode</button>
-                    <div>
-                      <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginBottom: 4 }}>Eller indtast stregkode manuelt</div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <input
-                          type="number"
-                          placeholder="f.eks. 5000112637922"
-                          style={{ fontFamily: 'IBM Plex Mono', fontSize: 13, padding: '7px 10px', border: '1px solid var(--line)', borderRadius: 3, background: 'var(--paper)', color: 'var(--ink)', width: 180 }}
-                          onKeyDown={e => { if (e.key === 'Enter' && e.target.value) opslaaStregkode(e.target.value); }}
-                          onChange={e => { if (e.target.value.length >= 8) opslaaStregkode(e.target.value); }}
-                        />
-                        <span style={{ fontSize: 11, color: 'var(--ink-soft)', alignSelf: 'center' }}>Tryk Enter</span>
-                      </div>
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginBottom: 4 }}>Slå op via stregkode (valgfri)</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        type="number"
+                        placeholder="f.eks. 3092718638412"
+                        style={{ fontFamily: 'IBM Plex Mono', fontSize: 13, padding: '7px 10px', border: '1px solid var(--line)', borderRadius: 3, background: 'var(--paper)', color: 'var(--ink)', flex: 1 }}
+                        onKeyDown={e => { if (e.key === 'Enter' && e.target.value) opslaaStregkode(e.target.value); }}
+                        onChange={e => { if (e.target.value.length >= 8) opslaaStregkode(e.target.value); }}
+                      />
+                      {currentModal.scanning && <span className="item-cat" style={{ alignSelf: 'center' }}>Slår op…</span>}
                     </div>
-                    {currentModal.scanning && <span className="item-cat" style={{ alignSelf: 'center' }}>Slår op…</span>}
-                    {currentModal.scanOk && <span style={{ fontSize: 12, color: 'var(--good)', alignSelf: 'center' }}>✓ {currentModal.scanOk}</span>}
-                    {currentModal.scanFejl && <span style={{ fontSize: 11, color: 'var(--crit)', alignSelf: 'center' }}>{currentModal.scanFejl}</span>}
+                    {currentModal.scanOk && <div style={{ fontSize: 12, color: 'var(--good)', marginTop: 4 }}>✓ {currentModal.scanOk}</div>}
+                    {currentModal.scanFejl && <div style={{ fontSize: 11, color: 'var(--crit)', marginTop: 4 }}>{currentModal.scanFejl}</div>}
                   </div>
                   <div className="field"><label>Varenavn</label><input value={currentModal.navn} onChange={e => setModal({ ...currentModal, navn: e.target.value })} placeholder="f.eks. Carlsberg fadøl" autoFocus /></div>
                   <div className="field-row">
