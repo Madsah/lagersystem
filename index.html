@@ -1300,11 +1300,15 @@ function MainApp({ session }) {
     if (!linjer.length) return;
     const varer = linjer.map(l => {
       const dele = l.split(',').map(s => s.trim());
-      return { navn: dele[0] || '', kategori: dele[1] || 'Andet', enhed: dele[2] || 'stk', pakke_str: '', pakke_antal: null, note: '', minimum: null, volumen_ml: null, indkoebspris: null, restaurant_id: activeRestId };
+      return {
+        navn: dele[0] || '', kategori: dele[1] || 'Andet', enhed: dele[2] || 'stk',
+        placering: dele[3] || '', pakke_str: '', pakke_antal: null,
+        note: '', minimum: null, volumen_ml: null, indkoebspris: null,
+        restaurant_id: activeRestId
+      };
     }).filter(v => v.navn);
     if (!varer.length) { setModal({ ...modal, fejl: 'Ingen gyldige varer fundet — tjek formatet.' }); return; }
     setSaving(true);
-    // Insert all at once instead of one by one
     const { error } = await db.from('varer').insert(varer);
     if (error) { setModal({ ...modal, fejl: `Fejl: ${error.message}` }); setSaving(false); return; }
     await reloadData();
@@ -2404,8 +2408,8 @@ function MainApp({ session }) {
               {currentModal.type === 'vare-bulk' && (<>
                 <div className="modal-head"><div className="modal-title">Tilføj mange varer</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
                 <div className="modal-body">
-                  <div className="hint">Skriv én vare per linje i formatet: <strong>Navn, Kategori, Enhed</strong><br />Kategori og enhed er valgfrie — standard er "Andet" og "stk".<br />Eksempel:<br />Coca-Cola 33cl, Sodavand, stk<br />Carlsberg fadøl, Øl, fustage<br />Husets rødvin, Vin, flasker</div>
-                  <div className="field"><label>Varer</label><textarea rows="12" value={currentModal.tekst} onChange={e => setModal({ ...currentModal, tekst: e.target.value })} placeholder="Coca-Cola 33cl, Sodavand, stk&#10;Sprite 33cl, Sodavand, stk&#10;Carlsberg fadøl, Øl, fustage" autoFocus /></div>
+                  <div className="hint">Skriv én vare per linje i formatet: <strong>Navn, Kategori, Enhed, Placering</strong><br />Kategori, enhed og placering er valgfrie — standard er "Andet", "stk" og ingen placering.<br />Eksempel:<br />Coca-Cola 33cl, Sodavand, stk, Bar køleskab<br />Carlsberg fadøl, Øl, fustage, Øl anlægget<br />Neusiedlersee Zweigelt, Rødvin, flasker, Vinkøleskab</div>
+                  <div className="field"><label>Varer</label><textarea rows="12" value={currentModal.tekst} onChange={e => setModal({ ...currentModal, tekst: e.target.value })} placeholder="Coca-Cola 33cl, Sodavand, stk, Bar køleskab&#10;Carlsberg fadøl, Øl, fustage, Øl anlægget&#10;Neusiedlersee Zweigelt, Rødvin, flasker, Vinkøleskab" autoFocus /></div>
                   {currentModal.fejl && <div style={{ color: 'var(--crit)', fontSize: 12 }}>{currentModal.fejl}</div>}
                 </div>
                 <div className="modal-foot"><button className="btn ghost" onClick={() => setModal(null)}>Annullér</button><button className="btn rust" onClick={submitBulkAdd} disabled={saving}>Tilføj alle varer</button></div>
