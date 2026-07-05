@@ -537,6 +537,99 @@ async function dbLoadAll(restaurantId) {
 }
 
 // ================================================================
+// BRUGER ROLLER MANAGER — admin can assign roles and restaurant access
+// ================================================================
+function BrugerRollerManager({ restauranter, session }) {
+  const [brugere, setBrugere] = useState([]);
+  const [roller, setRoller] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [nySaving, setNySaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const [{ data: r }, { data: b }] = await Promise.all([
+        db.from('bruger_roller').select('*'),
+        db.from('bruger_roller').select('user_id').then(async res => {
+          // Get all users via admin — use auth.users via service role not available client-side
+          // So just show what we have in roller table
+          return res;
+        }),
+      ]);
+      setRoller(r || []);
+      setLoading(false);
+    })();
+  }, []);
+
+  async function opdaterRolle(userId, restId, nyRolle) {
+    setNySaving(true);
+    if (nyRolle === 'ingen') {
+      await db.from('bruger_roller').delete().eq('user_id', userId).eq('restaurant_id', restId || null);
+    } else {
+      await db.from('bruger_roller').upsert({ user_id: userId, restaurant_id: restId || null, rolle: nyRolle }, { onConflict: 'user_id,restaurant_id' });
+    }
+    const { data } = await db.from('bruger_roller').select('*');
+    setRoller(data || []);
+    setNySaving(false);
+  }
+
+  if (loading) return <div className="compare-empty-note">Indlæser brugere…</div>;
+
+  // Group roller by user
+  const userIds = [...new Set(roller.map(r => r.user_id))];
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      {userIds.length === 0 && (
+        <div className="compare-empty-note">
+          Ingen bruger-roller konfigureret endnu. Kør <code>migration_2_roller.sql</code> i Supabase SQL Editor for at aktivere rolle-styring.
+        </div>
+      )}
+      {userIds.map(uid => {
+        const userRoller = roller.filter(r => r.user_id === uid);
+        const globalRolle = userRoller.find(r => r.restaurant_id === null);
+        const erSelvAdmin = uid === session.user.id && globalRolle?.rolle === 'admin';
+        return (
+          <div key={uid} style={{ border: '1px solid var(--line)', borderRadius: 4, padding: 12, marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div className="item-name" style={{ fontSize: 12 }}>{uid === session.user.id ? `${uid.slice(0,8)}… (dig)` : `${uid.slice(0,8)}…`}</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: 'var(--ink-soft)' }}>Global rolle:</span>
+                <select
+                  value={globalRolle?.rolle || 'ingen'}
+                  disabled={erSelvAdmin || nySaving}
+                  onChange={e => opdaterRolle(uid, null, e.target.value)}
+                  style={{ fontSize: 12, padding: '3px 6px', border: '1px solid var(--line)', borderRadius: 3, background: 'var(--paper)', color: 'var(--ink)' }}>
+                  <option value="ingen">Ingen global rolle</option>
+                  <option value="admin">Admin (alle restauranter)</option>
+                  <option value="personale">Personale (vælg restauranter nedenfor)</option>
+                </select>
+              </div>
+            </div>
+            {(!globalRolle || globalRolle.rolle === 'personale') && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                {restauranter.map(r => {
+                  const harAdgang = userRoller.some(ur => ur.restaurant_id === r.id);
+                  return (
+                    <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={harAdgang} disabled={nySaving}
+                        onChange={e => opdaterRolle(uid, r.id, e.target.checked ? 'personale' : 'ingen')} />
+                      {r.navn}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div className="compare-empty-note" style={{ marginTop: 8 }}>
+        Bemærk: Bruger-ID'er vises forkortet. For at se e-mails, gå til Supabase Dashboard → Authentication → Users.
+      </div>
+    </div>
+  );
+}
+
+// ================================================================
 // MOBIL OPTAELLING COMPONENT (needs its own hooks, so a real component)
 // ================================================================
 function MobilOptaelling({ varerForRest, activeRestId, restNavn, harPakke, toStkCombo, addOptaelling, saving, onDone, onCancel }) {
@@ -684,8 +777,11 @@ function MainApp({ session }) {
   const [activeRestId, setActiveRestId] = useState(null);
   const [restData, setRestData] = useState({ varer: [], optaellinger: [], leverancer: [], spild: [], posTal: [] });
   const [loading, setLoading] = useState(true);
+  const [brugerRolle, setBrugerRolle] = useState('admin'); // 'admin' or 'personale'
+  const [adgangRestIds, setAdgangRestIds] = useState(null); // null = alle, array = specifikke
   const [view, setView] = useState('dashboard');
   const [search, setSearch] = useState('');
+  const [globalSoeg, setGlobalSoeg] = useState('');
   const [modal, setModal] = useState(null);
   const [printView, setPrintView] = useState(null);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
@@ -694,12 +790,33 @@ function MainApp({ session }) {
   const [eksportMenuAaben, setEksportMenuAaben] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Load restaurants on mount
+  // Load restaurants and user role on mount
   useEffect(() => {
     (async () => {
+      // Load roles for current user
+      const { data: roller } = await db.from('bruger_roller').select('*').eq('user_id', session.user.id);
+      if (roller && roller.length > 0) {
+        const erAdmin = roller.some(r => r.rolle === 'admin' && r.restaurant_id === null);
+        if (erAdmin) {
+          setBrugerRolle('admin');
+          setAdgangRestIds(null); // adgang til alle
+        } else {
+          setBrugerRolle('personale');
+          setAdgangRestIds(roller.map(r => r.restaurant_id).filter(Boolean));
+        }
+      } else {
+        // No roles defined — treat as admin (backward compatible for existing setups)
+        setBrugerRolle('admin');
+        setAdgangRestIds(null);
+      }
+
       const { data } = await db.from('restauranter').select('*').order('navn');
-      setRestauranter(data || []);
-      if (data && data.length > 0) setActiveRestId(data[0].id);
+      const alleRest = data || [];
+      // Filter to only accessible restaurants for personale
+      const tilgaengelige = adgangRestIds === null ? alleRest : alleRest.filter(r => adgangRestIds.includes(r.id));
+      setRestauranter(tilgaengelige.length > 0 ? tilgaengelige : alleRest);
+      const forsteRest = (tilgaengelige.length > 0 ? tilgaengelige : alleRest)[0];
+      if (forsteRest) setActiveRestId(forsteRest.id);
       else setLoading(false);
     })();
   }, []);
@@ -909,16 +1026,19 @@ function MainApp({ session }) {
   function openBulkAdd() { setModal({ type: 'vare-bulk', tekst: '', fejl: '' }); }
   function openKopierVarer(fraRestId) { setModal({ type: 'vare-kopier', fraRestId, tilRestId: activeRestId }); }
 
+  const autoHvem = session?.user?.email?.split('@')[0] || '';
+  const erAdmin = brugerRolle === 'admin';
+
   function openAddDelivery(it) {
-    setModal({ type: 'levering', vareId: it ? it.id : (varerForRest[0]?.id || ''), antalPakker: '', antalLoese: '', dato: todayStr(), note: '', hvem: '' });
+    setModal({ type: 'levering', vareId: it ? it.id : (varerForRest[0]?.id || ''), antalPakker: '', antalLoese: '', dato: todayStr(), note: '', hvem: autoHvem });
   }
   function openAddSpild(it) {
-    setModal({ type: 'spild', vareId: it ? it.id : (varerForRest[0]?.id || ''), antalPakker: '', antalLoese: '', dato: todayStr(), note: '', hvem: '' });
+    setModal({ type: 'spild', vareId: it ? it.id : (varerForRest[0]?.id || ''), antalPakker: '', antalLoese: '', dato: todayStr(), note: '', hvem: autoHvem });
   }
   function openNewOptaelling() {
     const counts = {};
     varerForRest.forEach(it => { counts[it.id] = { pakker: '', loese: '' }; });
-    setModal({ type: 'optaelling', dato: todayStr(), counts, note: '', hvem: '', redigerId: null, kunManglende: false, lukkedeKategorier: {} });
+    setModal({ type: 'optaelling', dato: todayStr(), counts, note: '', hvem: autoHvem, redigerId: null, kunManglende: false, lukkedeKategorier: {} });
   }
   function openEditOptaelling(entry) {
     const counts = {};
@@ -928,7 +1048,7 @@ function MainApp({ session }) {
       else if (typeof c === 'object') counts[it.id] = { pakker: c.antalPakker ? String(c.antalPakker) : '', loese: c.antalLoese !== undefined ? String(c.antalLoese) : '' };
       else counts[it.id] = { pakker: '', loese: String(c) };
     });
-    setModal({ type: 'optaelling', dato: entry.dato, counts, note: entry.note || '', hvem: entry.hvem || '', redigerId: entry.id, kunManglende: false, lukkedeKategorier: {} });
+    setModal({ type: 'optaelling', dato: entry.dato, counts, note: entry.note || '', hvem: entry.hvem || autoHvem, redigerId: entry.id, kunManglende: false, lukkedeKategorier: {} });
   }
   function openPosIndsaet() { setModal({ type: 'pos-indsaet', trin: 'indtast', raaTekst: '', dato: todayStr(), matchede: [] }); }
   function openHistoryDetail(entry, typeLabel) { setModal({ type: 'historik-detalje', entry, typeLabel }); }
@@ -1179,6 +1299,49 @@ function MainApp({ session }) {
   const optStatus = getOptaellingsStatus();
   const PAAMINDELSESDAGE = 14;
 
+  function renderGlobalSoeg() {
+    const q = globalSoeg.toLowerCase().trim();
+    if (!q) return null;
+    // Search across all restaurants' varer (we only have current restaurant's data loaded)
+    // Show current restaurant results + note about others
+    const resultater = varerForRest
+      .filter(it => it.navn.toLowerCase().includes(q) || it.kategori.toLowerCase().includes(q) || (it.note || '').toLowerCase().includes(q))
+      .map(it => ({ ...it, restNavn: restNavn(activeRestId), restId: activeRestId }));
+
+    return (
+      <div>
+        <div className="section-title">Søgeresultater for "{globalSoeg}"</div>
+        <div className="compare-empty-note" style={{ marginBottom: 14 }}>
+          Søger i den aktuelle restaurant ({restNavn(activeRestId)}). Skift restaurant i navigationen for at søge i andre.
+        </div>
+        {resultater.length === 0 ? (
+          <div className="empty-state"><div className="display">Ingen resultater</div><div>Prøv et andet søgeord.</div></div>
+        ) : (
+          <table>
+            <thead><tr><th>Vare</th><th>Kategori</th><th>Restaurant</th><th className="num">Senest talt</th><th className="num">Status</th><th className="no-print"></th></tr></thead>
+            <tbody>
+              {resultater.map(it => {
+                const latest = getLatestCount(it.id);
+                const f = computeForbrug()[it.id];
+                const status = vurderLagerstatus(latest, f, it);
+                return (
+                  <tr key={it.id} onClick={() => { setActiveRestId(it.restId); setView('lager'); setSearch(it.navn); setGlobalSoeg(''); }} style={{ cursor: 'pointer' }}>
+                    <td><div className="item-name">{it.navn}</div>{it.note && <div className="item-cat" style={{ fontStyle: 'italic' }}>{it.note}</div>}</td>
+                    <td className="item-cat">{it.kategori}</td>
+                    <td className="item-cat">{it.restNavn}</td>
+                    <td className="num">{latest ? `${latest.stk} ${it.enhed}` : <span className="item-cat">ikke talt</span>}</td>
+                    <td className="num">{status ? <span className={`tag ${status.niveau}`}>{status.grund === 'under-min' ? 'Under min.' : status.grund === 'naer-min' ? 'Nær min.' : `~${status.dageTilbage}d`}</span> : <span className="item-cat">—</span>}</td>
+                    <td className="no-print"><button className="btn small ghost" onClick={e => { e.stopPropagation(); setActiveRestId(it.restId); setView('lager'); setSearch(it.navn); setGlobalSoeg(''); }}>Gå til →</button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    );
+  }
+
   function renderDashboard() {
     // Compute status for all restaurants using current restData (active restaurant only)
     // For the active restaurant we have full data; others show basic info
@@ -1379,8 +1542,8 @@ function MainApp({ session }) {
                       <div className="row-actions">
                         <button className="icon-btn" title="Levering" onClick={() => openAddDelivery(it)}>+</button>
                         <button className="icon-btn" title="Spild" onClick={() => openAddSpild(it)}>⚠</button>
-                        <button className="icon-btn" title="Redigér" onClick={() => openEditItem(it)}>✎</button>
-                        <button className="icon-btn" title="Fjern" onClick={() => handleDeleteItem(it)}>×</button>
+                        {erAdmin && <button className="icon-btn" title="Redigér" onClick={() => openEditItem(it)}>✎</button>}
+                        {erAdmin && <button className="icon-btn" title="Fjern" onClick={() => handleDeleteItem(it)}>×</button>}
                       </div>
                     </td>
                   </tr>
@@ -1699,13 +1862,16 @@ function MainApp({ session }) {
           <button className="btn rust" onClick={openAddRest}>+ Tilføj restaurant</button>
         </div>
         <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--line)' }}>
-          <div className="section-title">Brugere</div>
-          <div className="hint" style={{ marginTop: 0 }}>Tilføj og administrér brugere direkte i Supabase-dashboardet under Authentication → Users. Opret en ny bruger med en e-mail og adgangskode — de kan derefter logge ind her.</div>
-          <div style={{ marginTop: 10 }}><a href="https://supabase.com/dashboard" target="_blank" rel="noopener" className="btn ghost">Åbn Supabase Dashboard ↗</a></div>
+          <div className="section-title">Brugere &amp; adgang</div>
+          <div className="hint" style={{ marginTop: 0 }}>
+            Opret brugere i <a href="https://supabase.com/dashboard" target="_blank" rel="noopener" style={{ color: 'var(--rust)' }}>Supabase Dashboard ↗</a> under Authentication → Users.
+            Tildel dem derefter en rolle og restaurant-adgang herunder.
+          </div>
+          <BrugerRollerManager restauranter={restauranter} session={session} />
         </div>
         <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--line)' }}>
           <div className="section-title">Konto</div>
-          <div className="hint" style={{ marginTop: 0 }}>Logget ind som: {session.user.email}</div>
+          <div className="hint" style={{ marginTop: 0 }}>Logget ind som: {session.user.email} ({brugerRolle === 'admin' ? 'Administrator' : 'Personale'})</div>
           <button className="btn ghost" onClick={() => db.auth.signOut()}>Log ud</button>
         </div>
       </div>
@@ -1719,6 +1885,15 @@ function MainApp({ session }) {
     const synlige = m.kunManglende ? varerForRest.filter(it => !erUdfyldt(it)) : varerForRest;
     const kategorier = [];
     synlige.forEach(it => { const k = it.kategori || 'Andet'; let g = kategorier.find(g => g.navn === k); if (!g) { g = { navn: k, varer: [] }; kategorier.push(g); } g.varer.push(it); });
+
+    function gaaTilNaeste(e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const alle = Array.from(document.querySelectorAll('[data-opt-input]'));
+      const idx = alle.indexOf(e.target);
+      if (idx >= 0 && idx < alle.length - 1) alle[idx + 1].focus();
+    }
+
     return (
       <>
         <div className="opt-toolbar">
@@ -1745,13 +1920,19 @@ function MainApp({ session }) {
                     <div className="count-row-name"><div className="item-name">{it.navn}</div><div className="item-cat">{it.enhed}</div></div>
                     {harPakke(it) ? (
                       <div className="count-pakke-group">
-                        <input className="count-input-small" type="number" min="0" step="any" placeholder="0" value={c.pakker} onChange={e => setModal({ ...m, counts: { ...m.counts, [it.id]: { ...c, pakker: e.target.value } } })} />
+                        <input data-opt-input className="count-input-small" type="number" min="0" step="any" placeholder="0" value={c.pakker}
+                          onKeyDown={gaaTilNaeste}
+                          onChange={e => setModal({ ...m, counts: { ...m.counts, [it.id]: { ...c, pakker: e.target.value } } })} />
                         <span className="unit-label">{it.pakke_str}</span><span className="unit-label">+</span>
-                        <input className="count-input-small" type="number" min="0" step="any" placeholder="0" value={c.loese} onChange={e => setModal({ ...m, counts: { ...m.counts, [it.id]: { ...c, loese: e.target.value } } })} />
+                        <input data-opt-input className="count-input-small" type="number" min="0" step="any" placeholder="0" value={c.loese}
+                          onKeyDown={gaaTilNaeste}
+                          onChange={e => setModal({ ...m, counts: { ...m.counts, [it.id]: { ...c, loese: e.target.value } } })} />
                         <span className="unit-label">løse {it.enhed}</span>
                       </div>
                     ) : (
-                      <input className="count-input" type="number" min="0" step="any" placeholder="0" value={c.loese} onChange={e => setModal({ ...m, counts: { ...m.counts, [it.id]: { ...c, loese: e.target.value } } })} />
+                      <input data-opt-input className="count-input" type="number" min="0" step="any" placeholder="0" value={c.loese}
+                        onKeyDown={gaaTilNaeste}
+                        onChange={e => setModal({ ...m, counts: { ...m.counts, [it.id]: { ...c, loese: e.target.value } } })} />
                     )}
                   </div>
                 );
@@ -1773,6 +1954,14 @@ function MainApp({ session }) {
             <div className="brand-mark">LAGER<span>/</span>SYSTEM</div>
             <div className="brand-sub">Optælling, leverancer &amp; forbrug</div>
           </div>
+          <input
+            className="search-box no-print"
+            style={{ width: 200 }}
+            placeholder="🔍 Søg alle restauranter…"
+            value={globalSoeg}
+            onChange={e => { setGlobalSoeg(e.target.value); if (e.target.value) setView('global-soeg'); else setView('dashboard'); }}
+            onFocus={() => { if (globalSoeg) setView('global-soeg'); }}
+          />
           <div className="topbar-right no-print">
             {saving && <span style={{ fontSize: 11, color: 'var(--ink-soft)' }}>Gemmer…</span>}
             <button className="theme-btn" onClick={() => setDarkMode(!darkMode)} title={darkMode ? 'Lyst tema' : 'Mørkt tema'}>{darkMode ? '☀️' : '🌙'}</button>
@@ -1805,11 +1994,12 @@ function MainApp({ session }) {
           <button className={`vt-btn ${view === 'historik' ? 'active' : ''}`} onClick={() => setView('historik')}>Historik</button>
           <button className={`vt-btn ${view === 'sammenligning' ? 'active' : ''}`} onClick={() => setView('sammenligning')}>Sammenligning</button>
           <button className={`vt-btn ${view === 'analyse' ? 'active' : ''}`} onClick={() => setView('analyse')}>Analyse</button>
-          <button className={`vt-btn ${view === 'indstillinger' ? 'active' : ''}`} onClick={() => setView('indstillinger')}>Indstillinger</button>
+          {erAdmin && <button className={`vt-btn ${view === 'indstillinger' ? 'active' : ''}`} onClick={() => setView('indstillinger')}>Indstillinger</button>}
         </div>
 
         <div className="panel">
           {view === 'dashboard' && renderDashboard()}
+          {view === 'global-soeg' && renderGlobalSoeg()}
           {view === 'mobil-optaelling' && renderMobilOptaelling()}
           {view === 'lager' && renderLager()}
           {view === 'historik' && renderHistorik()}
