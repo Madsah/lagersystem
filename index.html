@@ -1218,7 +1218,7 @@ function MainApp({ session }) {
   function openAddRest() { setModal({ type: 'rest-add', navn: '' }); }
   function openEditRest(r) { setModal({ type: 'rest-edit', id: r.id, navn: r.navn }); }
 
-  function openAddItem() { setModal({ type: 'vare-add', navn: '', kategori: '', enhed: 'stk', brugPakke: false, pakkeStr: '', pakkeAntal: '', note: '', minimum: '', volumenMl: '', indkoebspris: '' }); }
+  function openAddItem() { setModal({ type: 'vare-add', navn: '', kategori: '', enhed: 'stk', brugPakke: false, pakkeStr: '', pakkeAntal: '', note: '', minimum: '', volumenMl: '', indkoebspris: '', placering: '' }); }
   function openEditItem(it) { setModal({ type: 'vare-edit', item: { ...it }, brugPakke: harPakke(it) }); }
   function openBulkAdd() { setModal({ type: 'vare-bulk', tekst: '', fejl: '' }); }
   function openKopierVarer(fraRestId) { setModal({ type: 'vare-kopier', fraRestId, tilRestId: activeRestId }); }
@@ -1277,6 +1277,7 @@ function MainApp({ session }) {
       note: modal.note || '', minimum: modal.minimum !== '' ? parseFloat(modal.minimum) || null : null,
       volumen_ml: modal.volumenMl !== '' ? parseFloat(modal.volumenMl) || null : null,
       indkoebspris: modal.indkoebspris !== '' ? parseFloat(modal.indkoebspris) || null : null,
+      placering: modal.placering || '',
     });
     setModal(null);
   }
@@ -1286,7 +1287,7 @@ function MainApp({ session }) {
     it.minimum = it.minimum !== '' && it.minimum !== null && it.minimum !== undefined ? parseFloat(it.minimum) || null : null;
     it.volumen_ml = it.volumen_ml !== '' && it.volumen_ml !== null && it.volumen_ml !== undefined ? parseFloat(it.volumen_ml) || null : null;
     it.indkoebspris = it.indkoebspris !== '' && it.indkoebspris !== null && it.indkoebspris !== undefined ? parseFloat(it.indkoebspris) || null : null;
-    await updateVare(it.id, { navn: it.navn, kategori: it.kategori, enhed: it.enhed, pakke_str: it.pakke_str, pakke_antal: it.pakke_antal, note: it.note || '', minimum: it.minimum, volumen_ml: it.volumen_ml, indkoebspris: it.indkoebspris });
+    await updateVare(it.id, { navn: it.navn, kategori: it.kategori, enhed: it.enhed, pakke_str: it.pakke_str, pakke_antal: it.pakke_antal, note: it.note || '', minimum: it.minimum, volumen_ml: it.volumen_ml, indkoebspris: it.indkoebspris, placering: it.placering || '' });
     setModal(null);
   }
   async function handleDeleteItem(it) {
@@ -1501,6 +1502,8 @@ function MainApp({ session }) {
   const forbrug = computeForbrug();
   const optStatus = getOptaellingsStatus();
   const PAAMINDELSESDAGE = 14;
+  // Derive unique placeringer from existing varer, sorted alphabetically
+  const placeringer = [...new Set(varerForRest.map(it => it.placering).filter(Boolean))].sort();
 
   function renderGlobalSoeg() {
     const q = globalSoeg.toLowerCase().trim();
@@ -1684,7 +1687,69 @@ function MainApp({ session }) {
   }
 
   function renderLager() {
-    const items = varerForRest.filter(it => !search || it.navn.toLowerCase().includes(search.toLowerCase()) || it.kategori.toLowerCase().includes(search.toLowerCase()));
+    const items = varerForRest.filter(it => !search || it.navn.toLowerCase().includes(search.toLowerCase()) || it.kategori.toLowerCase().includes(search.toLowerCase()) || (it.placering || '').toLowerCase().includes(search.toLowerCase()));
+
+    // Group by placering
+    const grupper = [];
+    const udenPlacering = items.filter(it => !it.placering);
+    const medPlacering = {};
+    items.filter(it => it.placering).forEach(it => {
+      if (!medPlacering[it.placering]) medPlacering[it.placering] = [];
+      medPlacering[it.placering].push(it);
+    });
+    Object.keys(medPlacering).sort().forEach(p => grupper.push({ navn: p, varer: medPlacering[p] }));
+    if (udenPlacering.length > 0) grupper.push({ navn: '(Ingen placering)', varer: udenPlacering });
+
+    // Compute total lagerværdi for active restaurant
+    const totalVaerdi = varerForRest.reduce((sum, it) => {
+      const latest = getLatestCount(it.id);
+      if (!latest || !it.indkoebspris) return sum;
+      return sum + latest.stk * it.indkoebspris;
+    }, 0);
+
+    function renderVareRaekke(it) {
+      const latest = getLatestCount(it.id);
+      const f = forbrug[it.id];
+      const vaerdi = latest && it.indkoebspris ? (latest.stk * it.indkoebspris) : null;
+      return (
+        <tr key={it.id}>
+          <td>
+            <div className="item-name">{it.navn}</div>
+            <div className="item-cat">
+              {it.enhed}
+              {harPakke(it) ? ` · 1 ${it.pakke_str} = ${it.pakke_antal} ${it.enhed}` : ''}
+              {it.volumen_ml ? ` · ${it.volumen_ml >= 1000 ? (it.volumen_ml/1000).toFixed(1) + 'L' : it.volumen_ml + 'ml'}` : ''}
+              {it.indkoebspris ? ` · ${it.indkoebspris.toFixed(2)} kr/stk` : ''}
+            </div>
+            {it.note && <div className="item-cat" style={{ fontStyle: 'italic' }}>{it.note}</div>}
+          </td>
+          <td className="item-cat">{it.kategori}</td>
+          <td className="num">
+            {latest ? (harPakke(it) && latest.antalPakker !== undefined ? (
+              <><div>{fmtPakkeLoese(it, latest.antalPakker, latest.antalLoese)}</div><div className="item-cat">= {latest.stk} {it.enhed}</div></>
+            ) : `${latest.stk} ${it.enhed}`) : <span className="item-cat">ikke talt</span>}
+          </td>
+          <td className="num">{vaerdi !== null ? <span>{Math.round(vaerdi)} kr</span> : <span className="item-cat">—</span>}</td>
+          <td className="num">{(() => {
+            const status = vurderLagerstatus(latest, f, it);
+            if (!status) return <span className="item-cat">—</span>;
+            if (status.grund === 'tom') return <span className="tag crit">Tom</span>;
+            if (status.grund === 'under-min') return <span className="tag crit">Under min. ({status.minimum} {it.enhed})</span>;
+            if (status.grund === 'naer-min') return <span className="tag low">Nær min. ({status.minimum} {it.enhed})</span>;
+            return <span className={`tag ${status.niveau}`}>~{status.dageTilbage} dage</span>;
+          })()}</td>
+          <td className="no-print">
+            <div className="row-actions">
+              <button className="icon-btn" title="Levering" onClick={() => openAddDelivery(it)}>+</button>
+              <button className="icon-btn" title="Spild" onClick={() => openAddSpild(it)}>⚠</button>
+              {erAdmin && <button className="icon-btn" title="Redigér" onClick={() => openEditItem(it)}>✎</button>}
+              {erAdmin && <button className="icon-btn" title="Fjern" onClick={() => handleDeleteItem(it)}>×</button>}
+            </div>
+          </td>
+        </tr>
+      );
+    }
+
     return (
       <div>
         {varerForRest.length > 0 && (optStatus.aldrigTalt || optStatus.dage >= PAAMINDELSESDAGE) && (
@@ -1692,8 +1757,14 @@ function MainApp({ session }) {
             {optStatus.aldrigTalt ? '⚠ Der er ikke lavet nogen optælling på denne restaurant endnu.' : `⚠ Sidst talt for ${optStatus.dage} dage siden (${fmtDateShort(optStatus.dato)}). Overvej en ny optælling.`}
           </div>
         )}
+        {totalVaerdi > 0 && (
+          <div className="banner" style={{ justifyContent: 'space-between' }}>
+            <span>Samlet lagerværdi (senest talt × indkøbspris)</span>
+            <strong>{Math.round(totalVaerdi).toLocaleString('da-DK')} kr</strong>
+          </div>
+        )}
         <div className="toolbar no-print">
-          <input className="search-box" placeholder="Søg vare eller kategori…" value={search} onChange={e => setSearch(e.target.value)} />
+          <input className="search-box" placeholder="Søg vare, kategori eller placering…" value={search} onChange={e => setSearch(e.target.value)} />
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn ghost" onClick={openAddItem}>+ Tilføj vare</button>
             <button className="btn ghost" onClick={openBulkAdd}>+ Tilføj mange</button>
@@ -1706,59 +1777,64 @@ function MainApp({ session }) {
         </div>
         {items.length === 0 ? (
           <div className="empty-state"><div className="display">Ingen varer endnu</div><div>Tilføj din første vare for at komme i gang.</div></div>
-        ) : (
-          <table className="lager-table">
-            <thead><tr>
-              <th>Vare</th><th>Kategori</th><th className="num">Senest talt</th>
-              <th className="num">Status</th><th className="num">Solgt siden sidst</th>
-              <th className="num">Spild</th><th className="num">Pr. dag</th><th className="no-print"></th>
-            </tr></thead>
-            <tbody>
-              {items.map(it => {
-                const latest = getLatestCount(it.id);
-                const f = forbrug[it.id];
-                return (
-                  <tr key={it.id}>
-                    <td>
-                      <div className="item-name">{it.navn}</div>
-                      <div className="item-cat">
-                        {it.enhed}
-                        {harPakke(it) ? ` · 1 ${it.pakke_str} = ${it.pakke_antal} ${it.enhed}` : ''}
-                        {it.volumen_ml ? ` · ${it.volumen_ml >= 1000 ? (it.volumen_ml/1000).toFixed(1) + 'L' : it.volumen_ml + 'ml'}` : ''}
-                        {it.indkoebspris ? ` · ${it.indkoebspris.toFixed(2)} kr` : ''}
-                      </div>
-                      {it.note && <div className="item-cat" style={{ fontStyle: 'italic' }}>{it.note}</div>}
-                    </td>
-                    <td className="item-cat">{it.kategori}</td>
-                    <td className="num">
-                      {latest ? (harPakke(it) && latest.antalPakker !== undefined ? (
-                        <><div>{fmtPakkeLoese(it, latest.antalPakker, latest.antalLoese)}</div><div className="item-cat">= {latest.stk} {it.enhed}</div></>
-                      ) : `${latest.stk} ${it.enhed}`) : <span className="item-cat">ikke talt</span>}
-                    </td>
-                    <td className="num">{(() => {
-                        const status = vurderLagerstatus(latest, f, it);
-                        if (!status) return <span className="item-cat">—</span>;
-                        if (status.grund === 'tom') return <span className="tag crit">Tom</span>;
-                        if (status.grund === 'under-min') return <span className="tag crit">Under min. ({status.minimum} {it.enhed})</span>;
-                        if (status.grund === 'naer-min') return <span className="tag low">Nær min. ({status.minimum} {it.enhed})</span>;
-                        return <span className={`tag ${status.niveau}`}>~{status.dageTilbage} dage</span>;
-                      })()}</td>
-                    <td className="num">{f ? <span className={`delta ${f.solgt > 0 ? 'used' : 'zero'}`}>{f.solgt} {it.enhed}</span> : <span className="item-cat">—</span>}</td>
-                    <td className="num">{f && f.spild > 0 ? <span className="delta used">{f.spild} {it.enhed}</span> : <span className="item-cat">—</span>}</td>
-                    <td className="num">{f ? <span className="item-cat">{f.perDag}/dag</span> : <span className="item-cat">—</span>}</td>
-                    <td className="no-print">
-                      <div className="row-actions">
-                        <button className="icon-btn" title="Levering" onClick={() => openAddDelivery(it)}>+</button>
-                        <button className="icon-btn" title="Spild" onClick={() => openAddSpild(it)}>⚠</button>
-                        {erAdmin && <button className="icon-btn" title="Redigér" onClick={() => openEditItem(it)}>✎</button>}
-                        {erAdmin && <button className="icon-btn" title="Fjern" onClick={() => handleDeleteItem(it)}>×</button>}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        ) : grupper.map(gruppe => {
+          // Compute group total (antal × stk for items with same navn across all locations)
+          const gruppeVaerdi = gruppe.varer.reduce((sum, it) => {
+            const latest = getLatestCount(it.id);
+            if (!latest || !it.indkoebspris) return sum;
+            return sum + latest.stk * it.indkoebspris;
+          }, 0);
+          const gruppeAntal = gruppe.varer.reduce((sum, it) => {
+            const latest = getLatestCount(it.id);
+            return sum + (latest ? latest.stk : 0);
+          }, 0);
+          return (
+            <div key={gruppe.navn} style={{ marginBottom: 28 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0 6px', borderBottom: '2px solid var(--ink)', marginBottom: 0 }}>
+                <div style={{ fontFamily: 'Oswald, sans-serif', textTransform: 'uppercase', fontSize: 15, fontWeight: 700 }}>{gruppe.navn}</div>
+                <div style={{ fontSize: 11, color: 'var(--ink-soft)', display: 'flex', gap: 16 }}>
+                  <span>{gruppe.varer.length} varer</span>
+                  {gruppeVaerdi > 0 && <span>{Math.round(gruppeVaerdi).toLocaleString('da-DK')} kr</span>}
+                </div>
+              </div>
+              <table className="lager-table">
+                <thead><tr>
+                  <th>Vare</th><th>Kategori</th><th className="num">Senest talt</th>
+                  <th className="num">Lagerværdi</th><th className="num">Status</th><th className="no-print"></th>
+                </tr></thead>
+                <tbody>{gruppe.varer.map(renderVareRaekke)}</tbody>
+              </table>
+            </div>
+          );
+        })}
+
+        {/* Total oversigt på tværs af placeringer for varer med samme navn */}
+        {placeringer.length > 1 && !search && (
+          <div style={{ marginTop: 28 }}>
+            <div style={{ fontFamily: 'Oswald, sans-serif', textTransform: 'uppercase', fontSize: 15, fontWeight: 700, padding: '8px 0 6px', borderBottom: '2px solid var(--ink)', marginBottom: 0 }}>
+              Total på tværs af placeringer
+            </div>
+            <table>
+              <thead><tr><th>Vare</th><th className="num">Total antal</th><th className="num">Total lagerværdi</th><th>Placeringer</th></tr></thead>
+              <tbody>
+                {[...new Set(varerForRest.map(it => it.navn))].sort().map(navn => {
+                  const alleInstanser = varerForRest.filter(it => it.navn === navn);
+                  if (alleInstanser.length < 2) return null; // kun vis hvis på flere placeringer
+                  const total = alleInstanser.reduce((sum, it) => { const l = getLatestCount(it.id); return sum + (l ? l.stk : 0); }, 0);
+                  const vaerdi = alleInstanser.reduce((sum, it) => { const l = getLatestCount(it.id); return sum + (l && it.indkoebspris ? l.stk * it.indkoebspris : 0); }, 0);
+                  const steder = alleInstanser.map(it => `${it.placering || '(ingen)'}:${getLatestCount(it.id)?.stk || 0}`).join(', ');
+                  return (
+                    <tr key={navn}>
+                      <td className="item-name">{navn}</td>
+                      <td className="num"><strong>{total}</strong> {alleInstanser[0].enhed}</td>
+                      <td className="num">{vaerdi > 0 ? `${Math.round(vaerdi)} kr` : '—'}</td>
+                      <td className="item-cat">{steder}</td>
+                    </tr>
+                  );
+                }).filter(Boolean)}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     );
@@ -2252,6 +2328,18 @@ function MainApp({ session }) {
                   </div>
                   <div className="field"><label>Varenavn</label><input value={currentModal.navn} onChange={e => setModal({ ...currentModal, navn: e.target.value })} placeholder="f.eks. Carlsberg fadøl" autoFocus /></div>
                   <div className="field-row">
+                    <div className="field"><label>Placering</label>
+                      <select value={currentModal.placering} onChange={e => setModal({ ...currentModal, placering: e.target.value })}>
+                        <option value="">— Vælg placering —</option>
+                        {placeringer.map(p => <option key={p} value={p}>{p}</option>)}
+                        <option value="__ny__">+ Ny placering…</option>
+                      </select>
+                    </div>
+                    {currentModal.placering === '__ny__' && (
+                      <div className="field"><label>Navn på placering</label><input autoFocus placeholder="f.eks. Kælderen" onChange={e => setModal({ ...currentModal, placering: e.target.value })} /></div>
+                    )}
+                  </div>
+                  <div className="field-row">
                     <div className="field"><label>Kategori</label><input value={currentModal.kategori} onChange={e => setModal({ ...currentModal, kategori: e.target.value })} placeholder="f.eks. Øl" /></div>
                     <div className="field"><label>Enhed</label><input value={currentModal.enhed} onChange={e => setModal({ ...currentModal, enhed: e.target.value })} placeholder="stk / flasker" /></div>
                   </div>
@@ -2278,6 +2366,18 @@ function MainApp({ session }) {
                 <div className="modal-head"><div className="modal-title">Redigér vare</div><button className="modal-close" onClick={() => setModal(null)}>×</button></div>
                 <div className="modal-body">
                   <div className="field"><label>Varenavn</label><input value={currentModal.item.navn} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, navn: e.target.value } })} /></div>
+                  <div className="field-row">
+                    <div className="field"><label>Placering</label>
+                      <select value={currentModal.item.placering || ''} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, placering: e.target.value } })}>
+                        <option value="">— Ingen placering —</option>
+                        {placeringer.map(p => <option key={p} value={p}>{p}</option>)}
+                        <option value="__ny__">+ Ny placering…</option>
+                      </select>
+                    </div>
+                    {currentModal.item.placering === '__ny__' && (
+                      <div className="field"><label>Navn på placering</label><input autoFocus placeholder="f.eks. Kælderen" onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, placering: e.target.value } })} /></div>
+                    )}
+                  </div>
                   <div className="field-row">
                     <div className="field"><label>Kategori</label><input value={currentModal.item.kategori} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, kategori: e.target.value } })} /></div>
                     <div className="field"><label>Enhed</label><input value={currentModal.item.enhed} onChange={e => setModal({ ...currentModal, item: { ...currentModal.item, enhed: e.target.value } })} /></div>
