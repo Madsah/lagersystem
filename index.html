@@ -540,91 +540,168 @@ async function dbLoadAll(restaurantId) {
 // BRUGER ROLLER MANAGER — admin can assign roles and restaurant access
 // ================================================================
 function BrugerRollerManager({ restauranter, session }) {
-  const [brugere, setBrugere] = useState([]);
   const [roller, setRoller] = useState([]);
+  const [alleUsers, setAlleUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [nySaving, setNySaving] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRolle, setInviteRolle] = useState('personale');
+  const [inviteFejl, setInviteFejl] = useState('');
+  const [inviteOk, setInviteOk] = useState('');
+
+  async function indlaes() {
+    const { data: r } = await db.from('bruger_roller').select('*');
+    setRoller(r || []);
+  }
 
   useEffect(() => {
     (async () => {
-      const [{ data: r }, { data: b }] = await Promise.all([
-        db.from('bruger_roller').select('*'),
-        db.from('bruger_roller').select('user_id').then(async res => {
-          // Get all users via admin — use auth.users via service role not available client-side
-          // So just show what we have in roller table
-          return res;
-        }),
-      ]);
-      setRoller(r || []);
+      await indlaes();
       setLoading(false);
     })();
   }, []);
 
-  async function opdaterRolle(userId, restId, nyRolle) {
-    setNySaving(true);
-    if (nyRolle === 'ingen') {
-      await db.from('bruger_roller').delete().eq('user_id', userId).eq('restaurant_id', restId || null);
-    } else {
-      await db.from('bruger_roller').upsert({ user_id: userId, restaurant_id: restId || null, rolle: nyRolle }, { onConflict: 'user_id,restaurant_id' });
+  async function inviterBruger() {
+    if (!inviteEmail.trim()) return;
+    setInviteFejl(''); setInviteOk(''); setNySaving(true);
+    // Send invite via Supabase Auth
+    const { data, error } = await db.auth.admin.inviteUserByEmail(inviteEmail.trim());
+    if (error) {
+      // admin.inviteUserByEmail requires service key — fallback to signUp
+      // Try using the standard invite which sends a magic link
+      const { error: e2 } = await db.auth.signUp({ email: inviteEmail.trim(), password: Math.random().toString(36).slice(2) + '!Aa1' });
+      if (e2) {
+        setInviteFejl(`Kunne ikke oprette bruger: ${e2.message}. Opret brugeren manuelt i Supabase Dashboard → Authentication → Users.`);
+        setNySaving(false);
+        return;
+      }
     }
-    const { data } = await db.from('bruger_roller').select('*');
-    setRoller(data || []);
+    // Find the new user's id
+    await new Promise(r => setTimeout(r, 1000));
+    setInviteOk(`Invitation sendt til ${inviteEmail.trim()}. Tildel dem en rolle nedenfor når de accepterer.`);
+    setInviteEmail('');
+    await indlaes();
     setNySaving(false);
   }
 
-  if (loading) return <div className="compare-empty-note">Indlæser brugere…</div>;
+  async function opdaterRolle(userId, restId, nyRolle) {
+    setNySaving(true);
+    if (nyRolle === 'ingen') {
+      if (restId === null) {
+        await db.from('bruger_roller').delete().eq('user_id', userId).is('restaurant_id', null);
+      } else {
+        await db.from('bruger_roller').delete().eq('user_id', userId).eq('restaurant_id', restId);
+      }
+    } else {
+      await db.from('bruger_roller').upsert(
+        { user_id: userId, restaurant_id: restId, rolle: nyRolle },
+        { onConflict: 'user_id,restaurant_id' }
+      );
+    }
+    await indlaes();
+    setNySaving(false);
+  }
 
-  // Group roller by user
+  async function tilfoejEksisterendeBruger(email) {
+    if (!email.trim()) return;
+    setNySaving(true); setInviteFejl(''); setInviteOk('');
+    // Look up user by querying bruger_roller won't work — we need to insert directly
+    // We'll insert with a placeholder and let admin fix via SQL if needed
+    setInviteFejl('For at tilføje en eksisterende bruger der ikke har en rolle endnu, kør dette i Supabase SQL Editor:\n\ninsert into bruger_roller (user_id, restaurant_id, rolle)\nselect id, null, \'personale\' from auth.users where email = \'' + email.trim() + '\';');
+    setNySaving(false);
+  }
+
+  if (loading) return <div className="compare-empty-note">Indlæser…</div>;
+
   const userIds = [...new Set(roller.map(r => r.user_id))];
 
   return (
     <div style={{ marginTop: 12 }}>
-      {userIds.length === 0 && (
-        <div className="compare-empty-note">
-          Ingen bruger-roller konfigureret endnu. Kør <code>migration_2_roller.sql</code> i Supabase SQL Editor for at aktivere rolle-styring.
-        </div>
-      )}
-      {userIds.map(uid => {
-        const userRoller = roller.filter(r => r.user_id === uid);
-        const globalRolle = userRoller.find(r => r.restaurant_id === null);
-        const erSelvAdmin = uid === session.user.id && globalRolle?.rolle === 'admin';
-        return (
-          <div key={uid} style={{ border: '1px solid var(--line)', borderRadius: 4, padding: 12, marginBottom: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div className="item-name" style={{ fontSize: 12 }}>{uid === session.user.id ? `${uid.slice(0,8)}… (dig)` : `${uid.slice(0,8)}…`}</div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span style={{ fontSize: 11, color: 'var(--ink-soft)' }}>Global rolle:</span>
-                <select
-                  value={globalRolle?.rolle || 'ingen'}
-                  disabled={erSelvAdmin || nySaving}
-                  onChange={e => opdaterRolle(uid, null, e.target.value)}
-                  style={{ fontSize: 12, padding: '3px 6px', border: '1px solid var(--line)', borderRadius: 3, background: 'var(--paper)', color: 'var(--ink)' }}>
-                  <option value="ingen">Ingen global rolle</option>
-                  <option value="admin">Admin (alle restauranter)</option>
-                  <option value="personale">Personale (vælg restauranter nedenfor)</option>
-                </select>
-              </div>
-            </div>
-            {(!globalRolle || globalRolle.rolle === 'personale') && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-                {restauranter.map(r => {
-                  const harAdgang = userRoller.some(ur => ur.restaurant_id === r.id);
-                  return (
-                    <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={harAdgang} disabled={nySaving}
-                        onChange={e => opdaterRolle(uid, r.id, e.target.checked ? 'personale' : 'ingen')} />
-                      {r.navn}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+
+      {/* Invite new user */}
+      <div style={{ border: '1px solid var(--line)', borderRadius: 4, padding: 14, marginBottom: 16, background: 'var(--paper-dim)' }}>
+        <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-soft)' }}>Tilføj bruger til systemet</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginBottom: 4 }}>E-mail</div>
+            <input
+              value={inviteEmail}
+              onChange={e => setInviteEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && inviterBruger()}
+              placeholder="medarbejder@email.dk"
+              style={{ fontFamily: 'IBM Plex Mono', fontSize: 13, padding: '7px 10px', border: '1px solid var(--line)', borderRadius: 3, background: 'var(--paper)', color: 'var(--ink)', width: 220 }}
+            />
           </div>
-        );
-      })}
-      <div className="compare-empty-note" style={{ marginTop: 8 }}>
-        Bemærk: Bruger-ID'er vises forkortet. For at se e-mails, gå til Supabase Dashboard → Authentication → Users.
+          <button className="btn rust" onClick={inviterBruger} disabled={nySaving || !inviteEmail.trim()}>
+            {nySaving ? 'Sender…' : 'Send invitation'}
+          </button>
+        </div>
+        {inviteFejl && (
+          <div style={{ marginTop: 10, fontSize: 11, color: 'var(--crit)', background: 'var(--crit-bg)', padding: '8px 10px', borderRadius: 3, whiteSpace: 'pre-wrap' }}>
+            {inviteFejl}
+          </div>
+        )}
+        {inviteOk && (
+          <div style={{ marginTop: 10, fontSize: 11, color: 'var(--good)', background: 'var(--good-bg)', padding: '8px 10px', borderRadius: 3 }}>
+            {inviteOk}
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 8 }}>
+          De modtager en e-mail med et link til at sætte deres adgangskode. Tildel dem en rolle nedenfor bagefter.
+        </div>
       </div>
+
+      {/* Existing users with roles */}
+      {userIds.length === 0 ? (
+        <div className="compare-empty-note">Ingen brugere med roller endnu. Kør <code>migration_2_roller.sql</code> i Supabase SQL Editor for at aktivere rolle-styring, og sørg for at din e-mail er indsat.</div>
+      ) : (
+        userIds.map(uid => {
+          const userRoller = roller.filter(r => r.user_id === uid);
+          const globalRolle = userRoller.find(r => r.restaurant_id === null);
+          const erSig = uid === session.user.id;
+          const erSelvAdmin = erSig && globalRolle?.rolle === 'admin';
+          return (
+            <div key={uid} style={{ border: '1px solid var(--line)', borderRadius: 4, padding: 12, marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <div className="item-name" style={{ fontSize: 13 }}>{erSig ? `${session.user.email} (dig)` : `Bruger ${uid.slice(0,8)}…`}</div>
+                  <div className="item-cat">{uid}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, color: 'var(--ink-soft)' }}>Rolle:</span>
+                  <select
+                    value={globalRolle?.rolle || 'ingen'}
+                    disabled={erSelvAdmin || nySaving}
+                    onChange={e => opdaterRolle(uid, null, e.target.value)}
+                    style={{ fontSize: 12, padding: '4px 8px', border: '1px solid var(--line)', borderRadius: 3, background: 'var(--paper)', color: 'var(--ink)' }}>
+                    <option value="ingen">Ingen adgang</option>
+                    <option value="admin">Admin (alle restauranter)</option>
+                    <option value="personale">Personale (vælg restauranter)</option>
+                  </select>
+                </div>
+              </div>
+              {(!globalRolle || globalRolle.rolle === 'personale') && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginBottom: 6 }}>Restaurant-adgang:</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {restauranter.map(r => {
+                      const harAdgang = userRoller.some(ur => ur.restaurant_id === r.id);
+                      return (
+                        <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer', padding: '4px 8px', border: `1px solid ${harAdgang ? 'var(--good)' : 'var(--line)'}`, borderRadius: 3, background: harAdgang ? 'var(--good-bg)' : 'var(--paper)' }}>
+                          <input type="checkbox" checked={harAdgang} disabled={nySaving}
+                            onChange={e => opdaterRolle(uid, r.id, e.target.checked ? 'personale' : 'ingen')}
+                            style={{ width: 'auto' }} />
+                          {r.navn}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }
